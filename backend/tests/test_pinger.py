@@ -1,8 +1,10 @@
 """Tests for pinger.py"""
 
+import asyncio
+
 import pytest
 
-from netsmoke.pinger import parse_fping_output
+from netsmoke.pinger import parse_fping_output, ping_hosts
 
 
 def test_parse_basic_output():
@@ -58,3 +60,22 @@ def test_parse_whitespace_tolerance():
     output = "  8.8.8.8 : 12.34  11.23  \n"
     result = parse_fping_output(output, ["8.8.8.8"])
     assert result["8.8.8.8"] == [12.34, 11.23]
+
+
+@pytest.mark.asyncio
+async def test_ping_hosts_empty_list():
+    """ping_hosts returns {} immediately for an empty host list without invoking fping."""
+    result = await ping_hosts([])
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_ping_hosts_fping_not_found(monkeypatch):
+    """ping_hosts raises RuntimeError when the fping binary is not on PATH."""
+    async def mock_exec(*args, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_exec)
+
+    with pytest.raises(RuntimeError, match="fping not found"):
+        await ping_hosts(["8.8.8.8"])

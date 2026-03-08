@@ -139,3 +139,26 @@ async def test_get_stats(client):
 async def test_get_stats_not_found(client):
     resp = await client.get("/api/targets/nonexistent/stats")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_graph_start_without_end_falls_back_to_range(client):
+    """Providing start but not end falls back to range-based rendering."""
+    now = int(time.time())
+    resp = await client.get(f"/api/graph/Google DNS?start={now - 3600}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_get_stats_window_below_minimum(client):
+    """window=59 is below the minimum of 60 and should return 422."""
+    resp = await client.get("/api/targets/Google DNS/stats?window=59")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_stats_window_above_maximum(client):
+    """window=86401 is above the maximum of 86400 and should return 422."""
+    resp = await client.get("/api/targets/Google DNS/stats?window=86401")
+    assert resp.status_code == 422
