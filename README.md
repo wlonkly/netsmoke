@@ -123,6 +123,8 @@ docker run -d \
 | `just run` | Production-style run (no reload) |
 | `just test` | Run backend test suite |
 | `just test-watch` | Re-run tests on file change |
+| `just test-frontend` | Run frontend test suite |
+| `just test-frontend-watch` | Re-run frontend tests on file change |
 | `just build` | Production frontend build into `frontend/dist/` |
 | `just install` | Sync all backend + frontend dependencies |
 
@@ -153,7 +155,13 @@ frontend/
       Sidebar.jsx          # Hierarchical target tree
       GraphView.jsx        # 4-panel graph view with drag-to-zoom overlay
       ZoomView.jsx         # Single-graph zoom view (editable time range)
-  vite.config.js     # Vite + React plugin config; proxies /api → :8000 in dev
+    test/
+      setup.js             # @testing-library/jest-dom global matchers
+      api.test.js          # URL builders and fetch wrappers
+      Sidebar.test.jsx     # States, rendering, active target, folder toggle
+      ZoomView.test.jsx    # Zoom-out math, drag-to-zoom pixel→timestamp mapping
+      App.test.jsx         # Auto-selection, zoom state transitions
+  vite.config.js     # Vite + React plugin, test config (jsdom); proxies /api → :8000 in dev
 
 config.example.yaml  # Sample config
 justfile             # Task runner recipes
@@ -220,6 +228,16 @@ just build
 ```
 
 Serve `frontend/dist/` from any static file host (or configure the backend to serve it directly).
+
+### Testing
+
+```bash
+just test-frontend          # run all tests once
+just test-frontend-watch    # watch mode
+npm test                    # same as just test-frontend (from frontend/)
+```
+
+Tests run with [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/react) in a jsdom environment. No browser or running server required.
 
 ### Zoom / time-selection
 

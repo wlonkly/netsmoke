@@ -9,10 +9,11 @@ SmokePing-inspired latency monitor. A Python/FastAPI backend collects fping data
 ## Dev workflow
 
 ```bash
-just dev      # start both services (hot-reload)
-just stop     # stop both
-just status   # check PIDs
-just test     # run backend test suite
+just dev               # start both services (hot-reload)
+just stop              # stop both
+just status            # check PIDs
+just test              # run backend test suite
+just test-frontend     # run frontend test suite
 ```
 
 Backend: http://localhost:8000 — Frontend: http://localhost:5173
@@ -121,6 +122,67 @@ async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 ```
 
 This means the collector does not run during tests. If you need to test collector behaviour, do it directly in a separate test — don't go through the API.
+
+---
+
+## Frontend testing
+
+Stack: **Vitest + React Testing Library**, jsdom environment. No Playwright — the frontend is thin wrappers around server-rendered PNGs; all meaningful logic is testable without a browser.
+
+### Running tests
+
+```bash
+just test-frontend          # one-shot (use this in CI / after changes)
+just test-frontend-watch    # watch mode during development
+```
+
+### Mock pattern for API calls
+
+`fetchTargets` and `fetchStats` do real HTTP — always mock them. `graphUrl` and `graphUrlWindow` are pure functions — use their real implementations.
+
+```js
+vi.mock('../api.js', async (importActual) => {
+  const actual = await importActual()
+  return { ...actual, fetchTargets: vi.fn(), fetchStats: vi.fn() }
+})
+```
+
+In `beforeEach`, reset mocks and set a default resolved value for `fetchStats` to avoid unhandled rejections when GraphView mounts:
+
+```js
+beforeEach(() => {
+  vi.resetAllMocks()
+  fetchStats.mockResolvedValue({ median_ms: 12.3, loss_pct: 0, sample_count: 10 })
+})
+```
+
+### Drag-to-zoom tests need a mocked `getBoundingClientRect`
+
+jsdom returns `{ width: 0, ... }` from `getBoundingClientRect`. A zero `containerWidth` causes the drag threshold check (`Math.abs(x1 - x0) < 5`) to silently kill the drag. Always mock the overlay before firing mouse events:
+
+```js
+const overlay = container.querySelector('.graph-drag-overlay')
+overlay.getBoundingClientRect = vi.fn().mockReturnValue({
+  left: 0, width: 500, top: 0, right: 500, bottom: 100, height: 100,
+})
+fireEvent.mouseDown(overlay, { clientX: 100 })
+fireEvent.mouseMove(overlay, { clientX: 300 })
+fireEvent.mouseUp(overlay)
+```
+
+### `GraphPanel` is not exported
+
+`GraphPanel` (inside `GraphView.jsx`) is an internal component. Its drag math is identical to `ZoomView`'s — test drag logic via `ZoomView` directly. For end-to-end zoom state transitions, use the App integration tests (which fire drag events on the `.graph-drag-overlay` rendered by GraphView).
+
+### Async App tests
+
+App calls `fetchTargets` on mount. Use `findBy*` (not `getBy*`) to wait for the async result before making assertions:
+
+```js
+await screen.findByText('Google DNS', { selector: '.graph-target-name' })
+```
+
+When a state update from a resolved promise would happen after your last assertion (e.g. `fetchStats` settling after a sidebar click), chain an `await findBy*` on something that only appears after that update to flush pending state.
 
 ---
 
