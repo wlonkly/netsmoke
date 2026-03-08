@@ -1,6 +1,10 @@
+import asyncio
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from netsmoke.app import app
+from netsmoke.services.targets import create_measurement_round
 
 
 
@@ -23,6 +27,27 @@ def test_target_detail_is_backed_by_database_sync() -> None:
     payload = response.json()
     assert payload['id'] == 'examples-example-target'
     assert payload['enabled'] is True
+
+
+
+def test_target_graph_endpoint_renders_stored_data() -> None:
+    with TestClient(app) as client:
+        asyncio.run(
+            create_measurement_round(
+                target_slug='examples-example-target',
+                observed_at=datetime(2026, 3, 8, 5, 0, tzinfo=UTC),
+                sent=4,
+                received=3,
+                loss_pct=25.0,
+                median_rtt_ms=12.0,
+                samples=(10.0, 12.0, None, 15.0),
+            )
+        )
+        response = client.get('/api/targets/examples-example-target/graph.svg?range=6h')
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('image/svg+xml')
+    assert 'Examples/Example Target' in response.text
 
 
 

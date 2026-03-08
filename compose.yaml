@@ -6,6 +6,8 @@ services:
     environment:
       NETSMOKE_CONFIG_PATH: /app/config/netsmoke.yaml
       NETSMOKE_DATABASE_URL: sqlite+aiosqlite:////app/data/netsmoke.db
+      NETSMOKE_COLLECTOR_ENABLED: "true"
+      NETSMOKE_FPING_BINARY: /usr/bin/fping
     volumes:
       - ./backend/src:/app/src
       - ./config:/app/config:ro
