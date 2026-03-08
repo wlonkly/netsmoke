@@ -8,6 +8,12 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Response
 from matplotlib.dates import DateFormatter, date2num
 
+from netsmoke.services.targets import (
+    get_latest_measurement_map,
+    get_target_by_slug,
+    pending_measurement,
+    target_record_to_payload,
+)
 from netsmoke.services.tree import FolderRecord, TargetRecord, get_flat_targets, get_tree
 from netsmoke.settings import settings
 
@@ -27,25 +33,12 @@ async def collector_status() -> dict[str, str | bool]:
 @router.get('/tree')
 async def tree() -> dict[str, list[dict[str, object]]]:
     config_tree = get_tree(settings.config_path)
-    targets = get_flat_targets(settings.config_path)
-    latest_by_id = {
-        target.id: {
-            'observedAt': datetime.now(UTC).isoformat(),
-            'medianRttMs': 42.7,
-            'lossPct': 0.0,
-        }
-        for target in targets
-    }
+    targets = list(get_flat_targets(settings.config_path))
+    latest_by_id = await get_latest_measurement_map([target.id for target in targets])
     return {
         'tree': [_serialize_node(node, latest_by_id) for node in config_tree],
         'targets': [
-            {
-                'id': target.id,
-                'name': target.name,
-                'path': target.path,
-                'host': target.host,
-                'lastMeasurement': latest_by_id[target.id],
-            }
+            target_record_to_payload(target, latest_by_id.get(target.id, pending_measurement()))
             for target in targets
         ],
     }
@@ -53,23 +46,20 @@ async def tree() -> dict[str, list[dict[str, object]]]:
 
 @router.get('/targets/{target_id}')
 async def target_detail(target_id: str) -> dict[str, object]:
-    target = _get_target_or_404(target_id)
-    return {
-        'id': target.id,
-        'name': target.name,
-        'path': target.path,
-        'host': target.host,
-        'lastMeasurement': {
-            'observedAt': datetime.now(UTC).isoformat(),
-            'medianRttMs': 42.7,
-            'lossPct': 0.0,
-        },
-    }
+    target_record = _get_config_target_or_404(target_id)
+    db_target = await get_target_by_slug(target_id)
+    if db_target is None:
+        raise HTTPException(status_code=404, detail='Target not found in database')
+
+    latest = await get_latest_measurement_map([target_id])
+    payload = target_record_to_payload(target_record, latest.get(target_id, pending_measurement()))
+    payload['enabled'] = db_target.enabled
+    return payload
 
 
 @router.get('/targets/{target_id}/graph.svg')
 async def graph_svg(target_id: str, range: str = '6h') -> Response:
-    target = _get_target_or_404(target_id)
+    target = _get_config_target_or_404(target_id)
     del range
 
     timestamps, samples = _generate_demo_samples(target.id)
@@ -86,7 +76,7 @@ def _serialize_node(node: FolderRecord | TargetRecord, latest_by_id: dict[str, d
             'type': 'host',
             'path': node.path,
             'host': node.host,
-            'lastMeasurement': latest_by_id[node.id],
+            'lastMeasurement': latest_by_id.get(node.id, pending_measurement()),
         }
 
     return {
@@ -99,7 +89,7 @@ def _serialize_node(node: FolderRecord | TargetRecord, latest_by_id: dict[str, d
 
 
 
-def _get_target_or_404(target_id: str) -> TargetRecord:
+def _get_config_target_or_404(target_id: str) -> TargetRecord:
     for target in get_flat_targets(settings.config_path):
         if target.id == target_id:
             return target
