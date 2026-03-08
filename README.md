@@ -1,1 +1,196 @@
 # netsmoke
+
+SmokePing-inspired network latency monitor. Sends batched pings to configured targets, stores round-trip times in SQLite, and renders smoke-band graphs via a React frontend backed by a FastAPI server.
+
+---
+
+## Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Python | ≥ 3.12 | Backend runtime |
+| [uv](https://docs.astral.sh/uv/) | latest | Python package/venv manager |
+| Node.js | ≥ 18 | Frontend build |
+| npm | ≥ 9 | Frontend package manager |
+| [just](https://github.com/casey/just) | latest | Task runner |
+| fping | any | Underlying ping tool used by collector |
+
+---
+
+## Quick start
+
+```bash
+# 1. Install dependencies
+just install
+
+# 2. Copy and edit the config
+cp config.example.yaml config.yaml
+$EDITOR config.yaml
+
+# 3. Start backend + frontend with hot-reload
+just dev
+```
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000
+
+`just dev` runs both processes under a single shell; `Ctrl-C` stops both.
+
+---
+
+## Configuration
+
+`config.yaml` controls targets and collection settings:
+
+```yaml
+settings:
+  ping_count: 20       # pings per measurement (determines smoke band width)
+  ping_interval: 60    # seconds between measurements
+
+targets:
+  - name: "Google DNS"
+    host: "8.8.8.8"
+  - folder: "CDNs"        # folders can be nested arbitrarily
+    targets:
+      - name: "Cloudflare"
+        host: "1.1.1.1"
+```
+
+The config is loaded once at startup. Change it and restart the backend to pick up new targets. Existing data for removed targets is retained in the database but no longer collected.
+
+---
+
+## Task runner (`just`)
+
+| Command | What it does |
+|---------|-------------|
+| `just dev` | Start backend + frontend with hot-reload |
+| `just stop` | Stop both services |
+| `just status` | Check whether services are running |
+| `just backend` | Backend only (with `--reload`) |
+| `just frontend` | Frontend only (Vite HMR) |
+| `just run` | Production-style run (no reload) |
+| `just test` | Run backend test suite |
+| `just test-watch` | Re-run tests on file change |
+| `just build` | Production frontend build into `frontend/dist/` |
+| `just install` | Sync all backend + frontend dependencies |
+
+---
+
+## Project layout
+
+```
+backend/
+  netsmoke/
+    main.py        # CLI entry point (argparse + uvicorn)
+    api.py         # FastAPI app, routes, lifespan
+    collector.py   # Background task: runs pinger on interval
+    pinger.py      # fping wrapper + output parser
+    db.py          # aiosqlite helpers (open, insert, query, prune)
+    graph.py       # matplotlib smoke-graph renderer
+    config.py      # YAML config loader + target tree
+  tests/           # pytest test suite (async, uses httpx ASGI transport)
+  pyproject.toml   # dependencies, build config, pytest config
+
+frontend/
+  src/
+    main.jsx         # React entry point
+    App.jsx          # Root: layout, active target, zoom state
+    App.css          # All styles (CSS variables, dark sidebar / light main)
+    api.js           # Thin fetch wrappers (graphUrl, graphUrlWindow, fetchStats, …)
+    components/
+      Sidebar.jsx          # Hierarchical target tree
+      GraphView.jsx        # 4-panel graph view with drag-to-zoom overlay
+      ZoomView.jsx         # Single-graph zoom view (editable time range)
+  vite.config.js     # Vite + React plugin config; proxies /api → :8000 in dev
+
+config.example.yaml  # Sample config
+justfile             # Task runner recipes
+```
+
+---
+
+## Backend
+
+### Running directly
+
+```bash
+cd backend
+uv run netsmoke --config ../config.yaml --db ../netsmoke.db
+```
+
+Options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` / `-c` | `config.yaml` | Path to YAML config |
+| `--db` | `netsmoke.db` | Path to SQLite database |
+| `--host` | `0.0.0.0` | Bind address |
+| `--port` | `8000` | Bind port |
+| `--reload` | off | Auto-reload on Python file changes |
+| `--log-level` | `info` | `debug` / `info` / `warning` / `error` |
+
+### API endpoints
+
+| Method | Path | Params | Description |
+|--------|------|--------|-------------|
+| `GET` | `/health` | — | `{"status": "ok"}` |
+| `GET` | `/api/targets` | — | Target tree as JSON |
+| `GET` | `/api/graph/{path}` | `range=3h\|2d\|1mo\|1y` | PNG smoke graph (named range) |
+| `GET` | `/api/graph/{path}` | `start=<unix>&end=<unix>` | PNG smoke graph (exact window) |
+| `GET` | `/api/targets/{path}/stats` | `window=<60-86400>` | `{median_ms, loss_pct, sample_count}` |
+
+When both `start` and `end` are present on the graph endpoint, `range` is ignored.
+
+### Graph rendering (`graph.py`)
+
+- `render_graph_for_target(db, target, time_range)` — named-range entry point; thin wrapper around `render_graph_for_window`
+- `render_graph_for_window(db, target, start_ts, end_ts)` — canonical path: queries DB, builds RTT matrix, renders PNG
+- `render_graph(timestamps, rtt_matrix, loss_pcts, start_ts, end_ts)` — pure matplotlib renderer; x-axis always pinned to the requested window
+- `_locator_and_format(duration_s)` — returns the right matplotlib tick locator/formatter for the window duration
+
+### Testing
+
+```bash
+just test              # run all tests
+just test -x -q        # stop on first failure, quiet output
+just test tests/test_graph.py  # specific file
+just test-watch        # re-run on file change
+```
+
+Tests use `pytest-asyncio` with `asyncio_mode = "auto"`. API tests create a full FastAPI app instance via `httpx.AsyncClient` + `ASGITransport` — no real server required. DB fixtures use `tmp_path` so tests never touch the live database.
+
+---
+
+## Frontend
+
+### Development
+
+Vite proxies all `/api` and `/health` requests to `http://localhost:8000`, so the frontend dev server (`localhost:5173`) works without CORS issues. See `vite.config.js`.
+
+### Production build
+
+```bash
+just build
+# Output: frontend/dist/
+```
+
+Serve `frontend/dist/` from any static file host (or configure the backend to serve it directly).
+
+### Zoom / time-selection
+
+Drag across any graph panel to select a time range. This opens a single-graph **zoom view** with:
+- Editable start/end datetime inputs — change them to re-render the graph
+- **Zoom out** — doubles the displayed duration, centered on the current midpoint
+- Drag-to-zoom — same interaction works within the zoom view for further drill-down
+- **Back** — returns to the 4-panel view
+
+The drag overlay maps pixel X coordinates linearly to Unix timestamps using the panel's known `startTs`/`endTs`. Matplotlib's Y-axis margin means the edges are slightly imprecise; use the datetime inputs to fine-tune.
+
+Clicking a different target in the sidebar while in zoom view resets back to the 4-panel view.
+
+---
+
+## Data retention
+
+The backend prunes samples older than 365 days on startup. There is no per-target quota.
