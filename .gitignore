@@ -14,3 +14,4 @@ data/*.sqlite
 backend/.coverage
 tmp/
 SmokePing/
+*.egg-info/
