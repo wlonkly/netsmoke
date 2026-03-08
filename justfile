@@ -95,6 +95,14 @@ test *args:
 test-watch:
     cd backend && uv run pytest-watch -- -q
 
+# Run frontend tests
+test-frontend:
+    cd frontend && npm test
+
+# Run frontend tests, re-run on file changes
+test-frontend-watch:
+    cd frontend && npm run test:watch
+
 # Build the frontend for production
 build:
     cd frontend && npm run build
