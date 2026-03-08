@@ -48,7 +48,7 @@ export function TargetDetail({ target }: TargetDetailProps) {
           <img
             alt={`Smoke graph preview for ${target.name}`}
             className="graph-image"
-            src="/api/targets/example-target/graph.svg?range=6h"
+            src={`/api/targets/${target.id}/graph.svg?range=6h`}
           />
         </div>
       </section>

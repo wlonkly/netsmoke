@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { TargetDetail } from './features/target/TargetDetail'
 import { TargetTree } from './features/tree/TargetTree'
-import { fetchTree, type TreeTarget } from './lib/api'
+import { fetchTree, type TreeNode, type TreeTarget } from './lib/api'
 
 export function App() {
   const [targets, setTargets] = useState<TreeTarget[]>([])
+  const [tree, setTree] = useState<TreeNode[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTree()
       .then((data) => {
-        setTargets(data)
-        setSelectedId(data[0]?.id ?? null)
+        setTargets(data.targets)
+        setTree(data.tree)
+        setSelectedId(data.targets[0]?.id ?? null)
       })
       .catch((err: Error) => {
         setError(err.message)
@@ -38,7 +40,7 @@ export function App() {
         <TargetTree
           onSelect={(target) => setSelectedId(target.id)}
           selectedId={selectedId}
-          targets={targets}
+          tree={tree}
         />
         <TargetDetail target={selectedTarget} />
       </div>

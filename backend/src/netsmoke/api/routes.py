@@ -5,8 +5,11 @@ import matplotlib
 matplotlib.use('svg')
 import matplotlib.pyplot as plt
 import numpy as np
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 from matplotlib.dates import DateFormatter, date2num
+
+from netsmoke.services.tree import FolderRecord, TargetRecord, get_flat_targets, get_tree
+from netsmoke.settings import settings
 
 router = APIRouter()
 
@@ -18,44 +21,99 @@ async def health() -> dict[str, str]:
 
 @router.get('/collector/status')
 async def collector_status() -> dict[str, str | bool]:
-    return {'status': 'idle', 'enabled': True}
+    return {'status': 'idle', 'enabled': settings.collector_enabled}
 
 
 @router.get('/tree')
 async def tree() -> dict[str, list[dict[str, object]]]:
+    config_tree = get_tree(settings.config_path)
+    targets = get_flat_targets(settings.config_path)
+    latest_by_id = {
+        target.id: {
+            'observedAt': datetime.now(UTC).isoformat(),
+            'medianRttMs': 42.7,
+            'lossPct': 0.0,
+        }
+        for target in targets
+    }
     return {
+        'tree': [_serialize_node(node, latest_by_id) for node in config_tree],
         'targets': [
             {
-                'id': 'example-target',
-                'name': 'Example Target',
-                'path': 'Examples/Example Target',
-                'host': 'example.com',
-                'lastMeasurement': {
-                    'observedAt': datetime.now(UTC).isoformat(),
-                    'medianRttMs': 42.7,
-                    'lossPct': 0.0,
-                },
+                'id': target.id,
+                'name': target.name,
+                'path': target.path,
+                'host': target.host,
+                'lastMeasurement': latest_by_id[target.id],
             }
-        ]
+            for target in targets
+        ],
+    }
+
+
+@router.get('/targets/{target_id}')
+async def target_detail(target_id: str) -> dict[str, object]:
+    target = _get_target_or_404(target_id)
+    return {
+        'id': target.id,
+        'name': target.name,
+        'path': target.path,
+        'host': target.host,
+        'lastMeasurement': {
+            'observedAt': datetime.now(UTC).isoformat(),
+            'medianRttMs': 42.7,
+            'lossPct': 0.0,
+        },
     }
 
 
 @router.get('/targets/{target_id}/graph.svg')
 async def graph_svg(target_id: str, range: str = '6h') -> Response:
-    del target_id, range
+    target = _get_target_or_404(target_id)
+    del range
 
-    timestamps, samples = _generate_demo_samples()
-    svg = _render_demo_graph(timestamps, samples)
+    timestamps, samples = _generate_demo_samples(target.id)
+    svg = _render_demo_graph(timestamps, samples, title=target.path)
     return Response(content=svg, media_type='image/svg+xml')
 
 
 
-def _generate_demo_samples(num_timestamps: int = 132, num_pings: int = 20) -> tuple[list[datetime], np.ndarray]:
-    rng = np.random.default_rng(29)
+def _serialize_node(node: FolderRecord | TargetRecord, latest_by_id: dict[str, dict[str, object]]) -> dict[str, object]:
+    if isinstance(node, TargetRecord):
+        return {
+            'id': node.id,
+            'name': node.name,
+            'type': 'host',
+            'path': node.path,
+            'host': node.host,
+            'lastMeasurement': latest_by_id[node.id],
+        }
+
+    return {
+        'id': node.id,
+        'name': node.name,
+        'type': 'folder',
+        'path': node.path,
+        'children': [_serialize_node(child, latest_by_id) for child in node.children],
+    }
+
+
+
+def _get_target_or_404(target_id: str) -> TargetRecord:
+    for target in get_flat_targets(settings.config_path):
+        if target.id == target_id:
+            return target
+    raise HTTPException(status_code=404, detail='Target not found')
+
+
+
+def _generate_demo_samples(seed_hint: str, num_timestamps: int = 132, num_pings: int = 20) -> tuple[list[datetime], np.ndarray]:
+    seed = sum(ord(character) for character in seed_hint) % 10_000
+    rng = np.random.default_rng(seed)
     start_time = datetime.now(UTC) - timedelta(hours=11)
     timestamps = [start_time + timedelta(minutes=5 * index) for index in range(num_timestamps)]
     rows = []
-    base_latency = 46.0
+    base_latency = 32.0 + (seed % 30)
 
     for index in range(num_timestamps):
         trend = 6.0 * np.sin(index / 20) + 2.5 * np.sin(index / 7)
@@ -77,7 +135,7 @@ def _generate_demo_samples(num_timestamps: int = 132, num_pings: int = 20) -> tu
 
 
 
-def _render_demo_graph(timestamps: list[datetime], samples: np.ndarray) -> str:
+def _render_demo_graph(timestamps: list[datetime], samples: np.ndarray, title: str) -> str:
     valid = np.where(np.isnan(samples), np.nan, samples)
     median = np.nanmedian(valid, axis=1)
     q1 = np.nanpercentile(valid, 25, axis=1)
@@ -120,7 +178,7 @@ def _render_demo_graph(timestamps: list[datetime], samples: np.ndarray) -> str:
         zorder=5,
     )
 
-    ax.set_title('netsmoke graph preview', fontsize=14, loc='left')
+    ax.set_title(title, fontsize=14, loc='left')
     ax.set_ylabel('Latency (ms)')
     ax.set_xlabel('Time')
     ax.grid(True, axis='y', alpha=0.18, linestyle='--', zorder=0)
