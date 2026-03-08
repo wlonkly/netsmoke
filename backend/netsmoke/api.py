@@ -8,12 +8,15 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from netsmoke.config import Config, load_config, tree_to_json, target_full_path
 from netsmoke.db import open_db, prune_old_data, query_latest_stats
@@ -157,5 +160,9 @@ def create_app() -> FastAPI:
 
         stats = await query_latest_stats(db, target_path, window_seconds=window)
         return {"target": target_path, **stats}
+
+    static_dir = os.environ.get("NETSMOKE_STATIC_DIR")
+    if static_dir and Path(static_dir).is_dir():
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app

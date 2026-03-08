@@ -60,6 +60,57 @@ The config is loaded once at startup. Change it and restart the backend to pick 
 
 ---
 
+## Docker
+
+The included `Dockerfile` builds a single image containing the compiled frontend and the Python backend. The backend serves the frontend as static files, so one container on port 8000 is all you need.
+
+### Quick start with Docker Compose
+
+```bash
+# 1. Copy and edit the config
+cp config.example.yaml config.yaml
+$EDITOR config.yaml
+
+# 2. Build and start
+docker compose up --build
+```
+
+Open http://localhost:8000. The React frontend loads from the same origin, so no CORS configuration is needed.
+
+### Data persistence
+
+By default `docker-compose.yml` uses a named Docker volume (`netsmoke-data`) for `/data` inside the container. The SQLite database lives at `/data/netsmoke.db`.
+
+To use a host directory instead (e.g. for direct file access), replace the volume entry in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./data:/data          # bind-mount host ./data to /data in container
+  # - netsmoke-data:/data  # (remove or comment out the named volume line)
+```
+
+### NET_RAW capability
+
+fping sends raw ICMP packets, which requires the `NET_RAW` Linux capability. The compose file adds it via `cap_add: [NET_RAW]`. Without it the collector will fail to ping any host. If your container runtime restricts capabilities, you may need to grant it explicitly or run the container with `--cap-add NET_RAW`.
+
+### Building and running manually
+
+```bash
+# Build
+docker build -t netsmoke .
+
+# Run (named volume for DB, read-only config bind-mount)
+docker run -d \
+  --name netsmoke \
+  -p 8000:8000 \
+  --cap-add NET_RAW \
+  -v netsmoke-data:/data \
+  -v "$(pwd)/config.yaml":/config/config.yaml:ro \
+  netsmoke
+```
+
+---
+
 ## Task runner (`just`)
 
 | Command | What it does |
