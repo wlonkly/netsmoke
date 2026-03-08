@@ -1,0 +1,19 @@
+settings:
+  ping_count: 20       # pings per measurement
+  ping_interval: 60    # seconds between measurements
+
+targets:
+  - name: "Google DNS"
+    host: "8.8.8.8"
+  - name: "Cloudflare DNS"
+    host: "1.1.1.1"
+  - folder: "CDNs"
+    targets:
+      - name: "Cloudflare"
+        host: "1.1.1.1"
+      - name: "Quad9"
+        host: "9.9.9.9"
+  - folder: "Local"
+    targets:
+      - name: "Gateway"
+        host: "10.55.10.2"
