@@ -17,8 +17,13 @@ This repository now contains:
 2. Run `docker compose up --build`.
 3. Open `http://localhost:5173`.
 
-## Notes
+## Current state
 
-- The current graph endpoint serves a deterministic demo SVG so we can iterate on visuals before wiring real measurements.
-- The collector and `fping` integration are scaffolded but not implemented yet.
-- SQLite is the initial datastore; schema evolution is set up with Alembic scaffolding.
+- The backend now runs as a long-lived FastAPI service that loads YAML config, syncs targets into SQLite, collects ICMP samples with `fping`, stores measurement rounds plus raw ping samples, and renders SmokePing-style SVG graphs from persisted data.
+- The frontend now shows the configured target tree, target detail, graph range selector, collector status, and recent measurement rounds, with automatic refresh during development.
+- `docker compose up --build` remains the expected local development entrypoint.
+
+## Known caveats
+
+- Under Colima on macOS, ICMP latency values gathered inside the container do not match host-network RTTs. The app is functioning, but the measured RTT reflects the Colima/container networking environment rather than trustworthy host-level Internet latency.
+- SQLite table creation is currently driven directly from SQLAlchemy metadata at startup. Alembic is scaffolded, but real schema migrations are still pending.
