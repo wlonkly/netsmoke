@@ -114,6 +114,17 @@ async def test_get_graph_not_found(client):
 
 
 @pytest.mark.asyncio
+async def test_get_graph_with_start_end(client):
+    now = int(time.time())
+    resp = await client.get(
+        f"/api/graph/Google DNS?start={now - 3600}&end={now}"
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content[:4] == b"\x89PNG"
+
+
+@pytest.mark.asyncio
 async def test_get_stats(client):
     resp = await client.get("/api/targets/Google DNS/stats")
     assert resp.status_code == 200

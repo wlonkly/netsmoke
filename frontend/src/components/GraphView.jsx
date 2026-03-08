@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react'
 import { graphUrl, fetchStats } from '../api.js'
 
+const RANGE_SECONDS = {
+  '3h':  3 * 3600,
+  '2d':  2 * 24 * 3600,
+  '1mo': 30 * 24 * 3600,
+  '1y':  365 * 24 * 3600,
+}
+
 const RANGES = [
   { value: '3h',  label: '3 hours' },
   { value: '2d',  label: '2 days' },
@@ -8,8 +15,39 @@ const RANGES = [
   { value: '1y',  label: '1 year' },
 ]
 
-function GraphPanel({ target, range, label, imgKey }) {
+function GraphPanel({ target, range, label, imgKey, startTs, endTs, onZoom }) {
   const url = graphUrl(target.path, range) + `&_k=${imgKey}`
+  const [drag, setDrag] = useState(null)
+
+  function handleMouseDown(e) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    setDrag({ x0: x, x1: x, containerWidth: rect.width })
+  }
+
+  function handleMouseMove(e) {
+    if (!drag) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
+    setDrag((d) => ({ ...d, x1: x }))
+  }
+
+  function handleMouseUp(e) {
+    if (!drag) return
+    const { x0, x1, containerWidth } = drag
+    setDrag(null)
+    if (Math.abs(x1 - x0) < 5) return
+    const left = Math.min(x0, x1)
+    const right = Math.max(x0, x1)
+    const selStart = Math.floor(startTs + (left / containerWidth) * (endTs - startTs))
+    const selEnd = Math.floor(startTs + (right / containerWidth) * (endTs - startTs))
+    if (onZoom) onZoom(selStart, selEnd)
+  }
+
+  const selectionStyle = drag
+    ? { left: Math.min(drag.x0, drag.x1), width: Math.abs(drag.x1 - drag.x0) }
+    : null
+
   return (
     <div className="graph-panel">
       <div className="graph-panel-label">{label}</div>
@@ -18,13 +56,22 @@ function GraphPanel({ target, range, label, imgKey }) {
           src={url}
           alt={`${label} latency graph for ${target.name}`}
           className="graph-img"
+          draggable={false}
         />
+        <div
+          className="graph-drag-overlay"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        />
+        {selectionStyle && <div className="drag-selection" style={selectionStyle} />}
       </div>
     </div>
   )
 }
 
-export default function GraphView({ target }) {
+export default function GraphView({ target, onZoom }) {
   const [imgKey, setImgKey] = useState(0)
   const [stats, setStats] = useState(null)
   const [statsError, setStatsError] = useState(null)
@@ -57,6 +104,8 @@ export default function GraphView({ target }) {
       </div>
     )
   }
+
+  const now = Math.floor(Date.now() / 1000)
 
   return (
     <div className="graph-view">
@@ -99,6 +148,9 @@ export default function GraphView({ target }) {
             range={value}
             label={label}
             imgKey={imgKey}
+            startTs={now - RANGE_SECONDS[value]}
+            endTs={now}
+            onZoom={onZoom}
           />
         ))}
       </div>

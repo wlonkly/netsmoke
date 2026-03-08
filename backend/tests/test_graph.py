@@ -16,6 +16,7 @@ from netsmoke.graph import (
     calculate_smoke_bands,
     render_graph,
     render_graph_for_target,
+    render_graph_for_window,
 )
 
 
@@ -95,8 +96,26 @@ def test_render_graph_returns_png_bytes():
             rows.append((ts, j + 1, 10.0 + j))
 
     timestamps, matrix, loss_pcts = build_rtt_matrix(rows, num_pings=20)
-    result = render_graph(timestamps, matrix, loss_pcts, title="Test", time_range="3h")
+    result = render_graph(
+        timestamps, matrix, loss_pcts,
+        title="Test",
+        start_ts=now - 3 * 3600,
+        end_ts=now + 10 * 60,
+    )
 
+    assert isinstance(result, bytes)
+    assert result[:4] == b"\x89PNG"
+
+
+@pytest.mark.asyncio
+async def test_render_graph_for_window(seeded_db):
+    now = int(time.time())
+    result = await render_graph_for_window(
+        seeded_db, "CDNs/Cloudflare",
+        start_ts=now - 3600,
+        end_ts=now,
+        num_pings=20,
+    )
     assert isinstance(result, bytes)
     assert result[:4] == b"\x89PNG"
 

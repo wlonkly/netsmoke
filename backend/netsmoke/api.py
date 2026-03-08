@@ -17,7 +17,7 @@ from fastapi.responses import Response
 
 from netsmoke.config import Config, load_config, tree_to_json, target_full_path
 from netsmoke.db import open_db, prune_old_data, query_latest_stats
-from netsmoke.graph import render_graph_for_target, RANGE_SECONDS
+from netsmoke.graph import render_graph_for_target, render_graph_for_window, RANGE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,8 @@ def create_app() -> FastAPI:
     async def get_graph(
         target_path: str,
         range: str = Query(default="3h", pattern="^(3h|2d|1mo|1y)$"),
+        start: int | None = Query(default=None),
+        end: int | None = Query(default=None),
     ) -> Response:
         config = get_config()
         db = get_db()
@@ -131,9 +133,14 @@ def create_app() -> FastAPI:
         if target_path not in valid_paths:
             raise HTTPException(status_code=404, detail=f"Target not found: {target_path}")
 
-        png_bytes = await render_graph_for_target(
-            db, target_path, range, num_pings=config.ping_count
-        )
+        if start is not None and end is not None:
+            png_bytes = await render_graph_for_window(
+                db, target_path, start, end, num_pings=config.ping_count
+            )
+        else:
+            png_bytes = await render_graph_for_target(
+                db, target_path, range, num_pings=config.ping_count
+            )
         return Response(content=png_bytes, media_type="image/png")
 
     @app.get("/api/targets/{target_path:path}/stats")

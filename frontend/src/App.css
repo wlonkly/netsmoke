@@ -218,6 +218,24 @@ button {
   border: 1px solid var(--border-main);
   border-radius: 6px;
   overflow: hidden;
+  position: relative;
+}
+
+.graph-drag-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  z-index: 10;
+}
+
+.drag-selection {
+  position: absolute;
+  background: rgba(74, 158, 255, 0.2);
+  border: 1px solid #4a9eff;
+  pointer-events: none;
+  z-index: 11;
+  top: 0;
+  bottom: 0;
 }
 
 .graph-img {
@@ -268,6 +286,54 @@ button {
   color: var(--text-muted);
 }
 
+
+/* ─── Zoom View ─────────────────────────────────────────────────────────────── */
+
+.zoom-view {
+  max-width: 1000px;
+}
+
+.zoom-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.zoom-time-input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 3px;
+  padding: 3px 6px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+}
+
+.btn-back,
+.btn-zoom-out {
+  padding: 4px 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.btn-back:hover,
+.btn-zoom-out:hover {
+  background: var(--border-main);
+}
 
 /* ─── Responsive ────────────────────────────────────────────────────────────── */
 

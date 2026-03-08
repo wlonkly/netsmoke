@@ -127,14 +127,25 @@ def build_rtt_matrix(
     return timestamps, rtt_matrix, loss_pcts
 
 
+def _locator_and_format(duration_s: float):
+    """Return (locator, formatter) appropriate for the given duration in seconds."""
+    if duration_s < 21_600:  # < 6 h
+        return mdates.MinuteLocator(byminute=[0, 30]), mdates.DateFormatter("%H:%M")
+    elif duration_s < 259_200:  # < 3 d
+        return mdates.HourLocator(byhour=range(0, 24, 6)), mdates.DateFormatter("%a %H:%M")
+    elif duration_s < 5_184_000:  # < 60 d
+        return mdates.DayLocator(interval=3), mdates.DateFormatter("%b %d")
+    else:
+        return mdates.MonthLocator(), mdates.DateFormatter("%b %Y")
+
+
 def render_graph(
     timestamps: list[datetime],
     rtt_matrix: np.ndarray,
     loss_pcts: np.ndarray,
     title: str = "Ping Latency",
-    time_range: str = "3h",
-    start_ts: int | None = None,
-    end_ts: int | None = None,
+    start_ts: int = 0,
+    end_ts: int = 0,
 ) -> bytes:
     """
     Render a smoke graph from pre-built matrices.
@@ -142,6 +153,7 @@ def render_graph(
     start_ts / end_ts: Unix timestamps defining the full window to display.
     The x-axis is always pinned to this range so the graph shows the full
     requested period even when data only covers part of it.
+    When both are 0, defaults to now-3h to now.
 
     Returns PNG bytes.
     """
@@ -149,13 +161,13 @@ def render_graph(
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
-    # Pin x-axis to the full requested window
     now = int(time.time())
-    x_end = datetime.fromtimestamp(end_ts if end_ts is not None else now, tz=timezone.utc)
-    x_start = datetime.fromtimestamp(
-        start_ts if start_ts is not None else now - RANGE_SECONDS.get(time_range, 3600 * 3),
-        tz=timezone.utc,
-    )
+    _end_ts = end_ts if end_ts != 0 else now
+    _start_ts = start_ts if start_ts != 0 else _end_ts - RANGE_SECONDS["3h"]
+    duration_s = _end_ts - _start_ts
+
+    x_end = datetime.fromtimestamp(_end_ts, tz=timezone.utc)
+    x_start = datetime.fromtimestamp(_start_ts, tz=timezone.utc)
     ax.set_xlim(mdates.date2num(x_start), mdates.date2num(x_end))
 
     if len(timestamps) == 0 or rtt_matrix.shape[0] == 0:
@@ -165,7 +177,7 @@ def render_graph(
             ha="center", va="center",
             color="#888888", fontsize=14,
         )
-        _style_axes(ax, title, time_range)
+        _style_axes(ax, title, duration_s)
         buf = io.BytesIO()
         plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig)
@@ -191,7 +203,7 @@ def render_graph(
         # shrink all bars to near-zero width.
         width = float(np.median(np.diff(x)))
     else:
-        width = RANGE_SECONDS.get(time_range, 3600 * 3) / 86400
+        width = duration_s / 86400
 
     for band in bands:
         ax.bar(
@@ -218,7 +230,7 @@ def render_graph(
                 zorder=100,
             )
 
-    _style_axes(ax, title, time_range)
+    _style_axes(ax, title, duration_s)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
@@ -226,7 +238,7 @@ def render_graph(
     return buf.getvalue()
 
 
-def _style_axes(ax: plt.Axes, title: str, time_range: str) -> None:
+def _style_axes(ax: plt.Axes, title: str, duration_s: float) -> None:
     ax.set_title(title, color="#1a1a2e", fontsize=12, pad=8)
     ax.set_xlabel("Time", color="#555577", fontsize=10)
     ax.set_ylabel("Latency (ms)", color="#555577", fontsize=10)
@@ -238,21 +250,34 @@ def _style_axes(ax: plt.Axes, title: str, time_range: str) -> None:
     ax.grid(True, alpha=0.5, linestyle="--", color="#ccccdd", zorder=0)
     ax.set_ylim(bottom=0)
 
-    # Choose appropriate date format and tick density for each range
-    if time_range == "3h":
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(byminute=[0, 30]))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    elif time_range == "2d":
-        ax.xaxis.set_major_locator(mdates.HourLocator(byhour=range(0, 24, 6)))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%a %H:%M"))
-    elif time_range == "1mo":
-        ax.xaxis.set_major_locator(mdates.DayLocator(interval=3))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    else:  # 1y
-        ax.xaxis.set_major_locator(mdates.MonthLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    locator, formatter = _locator_and_format(duration_s)
+    ax.xaxis.set_major_locator(locator)
+    ax.xaxis.set_major_formatter(formatter)
 
     plt.gcf().autofmt_xdate(rotation=30, ha="right")
+
+
+async def render_graph_for_window(
+    db,
+    target: str,
+    start_ts: int,
+    end_ts: int,
+    num_pings: int = 20,
+) -> bytes:
+    """
+    Query the DB and render a graph for the given target and exact time window.
+    """
+    from netsmoke.db import query_samples
+
+    rows = await query_samples(db, target, start_ts, end_ts)
+    timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
+
+    return render_graph(
+        timestamps, rtt_matrix, loss_pcts,
+        title=target,
+        start_ts=start_ts,
+        end_ts=end_ts,
+    )
 
 
 async def render_graph_for_target(
@@ -262,25 +287,9 @@ async def render_graph_for_target(
     num_pings: int = 20,
 ) -> bytes:
     """
-    Query the DB and render a graph for the given target and time range.
-
-    db: aiosqlite.Connection
-    target: full path string e.g. "CDNs/Cloudflare"
-    time_range: one of "3h", "12h", "24h", "1w"
+    Query the DB and render a graph for the given target and named time range.
     """
-    from netsmoke.db import query_samples
-
     seconds = RANGE_SECONDS.get(time_range, RANGE_SECONDS["3h"])
     end_ts = int(time.time())
     start_ts = end_ts - seconds
-
-    rows = await query_samples(db, target, start_ts, end_ts)
-    timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
-
-    return render_graph(
-        timestamps, rtt_matrix, loss_pcts,
-        title=target,
-        time_range=time_range,
-        start_ts=start_ts,
-        end_ts=end_ts,
-    )
+    return await render_graph_for_window(db, target, start_ts, end_ts, num_pings)
