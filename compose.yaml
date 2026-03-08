@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    command: uvicorn netsmoke.app:app --host 0.0.0.0 --port 8000
+    environment:
+      NETSMOKE_CONFIG_PATH: /app/config/netsmoke.yaml
+      NETSMOKE_DATABASE_URL: sqlite+aiosqlite:////app/data/netsmoke.db
+    volumes:
+      - ./backend/src:/app/src
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    cap_add:
+      - NET_RAW
+
+  frontend:
+    build:
+      context: ./frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend

@@ -1,0 +1,28 @@
+defaults:
+  step_seconds: 300
+  pings: 20
+  timeout_seconds: 1.0
+  packet_size_bytes: 56
+
+targets:
+  - name: Managed
+    type: folder
+    children:
+      - name: Internal
+        type: folder
+        children:
+          - name: gateway
+            type: host
+            host: 192.0.2.1
+          - name: dns
+            type: host
+            host: 192.0.2.53
+      - name: External
+        type: folder
+        children:
+          - name: cloudflare-dns
+            type: host
+            host: 1.1.1.1
+          - name: google-dns
+            type: host
+            host: 8.8.8.8

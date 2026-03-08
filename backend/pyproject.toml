@@ -1,0 +1,46 @@
+[project]
+name = "netsmoke-backend"
+version = "0.1.0"
+description = "Backend service for netsmoke"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "aiosqlite>=0.21.0",
+  "alembic>=1.16.5",
+  "fastapi>=0.116.1",
+  "matplotlib>=3.10.6",
+  "pydantic>=2.11.9",
+  "pydantic-settings>=2.10.1",
+  "pyyaml>=6.0.2",
+  "sqlalchemy>=2.0.43",
+  "uvicorn[standard]>=0.35.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.1",
+  "pytest>=8.4.2",
+  "pytest-asyncio>=1.2.0",
+  "ruff>=0.13.0",
+]
+
+[build-system]
+requires = ["setuptools>=80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]

@@ -1,0 +1,13 @@
+defaults:
+  step_seconds: 300
+  pings: 20
+  timeout_seconds: 1.0
+  packet_size_bytes: 56
+
+targets:
+  - name: Examples
+    type: folder
+    children:
+      - name: Example Target
+        type: host
+        host: example.com
