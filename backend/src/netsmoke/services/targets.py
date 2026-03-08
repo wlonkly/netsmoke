@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, select
 from netsmoke.db.session import get_session_factory
 from netsmoke.models import MeasurementRound, PingSample, Target
 from netsmoke.services.tree import TargetRecord, get_flat_targets
-from netsmoke.services.types import CollectedRound, GraphSeries
+from netsmoke.services.types import CollectedRound, GraphSeries, RecentMeasurement
 from netsmoke.settings import settings
 
 
@@ -102,6 +102,37 @@ async def get_latest_measurement_map(target_slugs: list[str]) -> dict[str, dict[
         }
         for row in rows
     }
+
+
+async def get_recent_measurements(target_slug: str, limit: int = 10) -> list[RecentMeasurement]:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(
+                    MeasurementRound.observed_at,
+                    MeasurementRound.sent,
+                    MeasurementRound.received,
+                    MeasurementRound.loss_pct,
+                    MeasurementRound.median_rtt_ms,
+                )
+                .join(Target, Target.id == MeasurementRound.target_id)
+                .where(Target.slug == target_slug)
+                .order_by(MeasurementRound.observed_at.desc())
+                .limit(limit)
+            )
+        ).all()
+
+    return [
+        RecentMeasurement(
+            observed_at=_ensure_utc(row.observed_at),
+            sent=row.sent,
+            received=row.received,
+            loss_pct=row.loss_pct,
+            median_rtt_ms=row.median_rtt_ms,
+        )
+        for row in rows
+    ]
 
 
 async def store_measurement_batch(rounds: list[CollectedRound]) -> None:
@@ -227,12 +258,23 @@ def target_record_to_payload(target: TargetRecord, measurement: dict[str, Any]) 
 
 
 
+def recent_measurement_to_payload(measurement: RecentMeasurement) -> dict[str, object]:
+    return {
+        'observedAt': _to_iso(measurement.observed_at),
+        'sent': measurement.sent,
+        'received': measurement.received,
+        'lossPct': measurement.loss_pct,
+        'medianRttMs': measurement.median_rtt_ms,
+    }
+
 
 
 def _ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
 
 def _to_iso(value: datetime) -> str:
     if value.tzinfo is None:

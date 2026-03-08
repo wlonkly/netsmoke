@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from netsmoke.config_loader import load_config, resolve_config_path
 
 
@@ -33,3 +35,22 @@ def test_resolve_config_path_finds_repo_config_when_default_path_missing() -> No
 
     assert resolved.name == 'netsmoke.yaml'
     assert resolved.exists()
+
+
+
+def test_load_config_rejects_duplicate_generated_ids(tmp_path: Path) -> None:
+    config_file = tmp_path / 'netsmoke.yaml'
+    config_file.write_text(
+        '''
+        targets:
+          - name: Foo Bar
+            type: host
+            host: 192.0.2.1
+          - name: Foo-Bar
+            type: host
+            host: 192.0.2.2
+        '''
+    )
+
+    with pytest.raises(ValueError, match='duplicate target id'):
+        load_config(config_file)

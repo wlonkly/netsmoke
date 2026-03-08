@@ -4,12 +4,15 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Response
 
+from netsmoke.collector.service import get_collector_runtime_state
 from netsmoke.graphs.smoke import render_smoke_svg
 from netsmoke.services.targets import (
     get_graph_series,
     get_latest_measurement_map,
+    get_recent_measurements,
     get_target_by_slug,
     pending_measurement,
+    recent_measurement_to_payload,
     target_record_to_payload,
 )
 from netsmoke.services.tree import FolderRecord, TargetRecord, get_flat_targets, get_tree
@@ -24,8 +27,8 @@ async def health() -> dict[str, str]:
 
 
 @router.get('/collector/status')
-async def collector_status() -> dict[str, str | bool]:
-    return {'status': 'running' if settings.collector_enabled else 'disabled', 'enabled': settings.collector_enabled}
+async def collector_status() -> dict[str, object]:
+    return get_collector_runtime_state()
 
 
 @router.get('/tree')
@@ -50,8 +53,10 @@ async def target_detail(target_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail='Target not found in database')
 
     latest = await get_latest_measurement_map([target_id])
+    recent_measurements = await get_recent_measurements(target_id, limit=10)
     payload = target_record_to_payload(target_record, latest.get(target_id, pending_measurement()))
     payload['enabled'] = db_target.enabled
+    payload['recentMeasurements'] = [recent_measurement_to_payload(item) for item in recent_measurements]
     return payload
 
 

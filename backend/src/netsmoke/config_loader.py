@@ -5,6 +5,12 @@ import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
+def _slugify(value: str) -> str:
+    normalized = ''.join(character.lower() if character.isalnum() else '-' for character in value)
+    collapsed = '-'.join(part for part in normalized.split('-') if part)
+    return collapsed or 'node'
+
+
 class ProbeDefaults(BaseModel):
     step_seconds: int = 300
     pings: int = 20
@@ -32,6 +38,31 @@ class TargetNode(BaseModel):
 class NetsmokeConfig(BaseModel):
     defaults: ProbeDefaults = Field(default_factory=ProbeDefaults)
     targets: list[TargetNode]
+
+    @model_validator(mode='after')
+    def validate_unique_targets(self) -> 'NetsmokeConfig':
+        seen_ids: set[str] = set()
+        seen_paths: set[str] = set()
+
+        def walk(node: TargetNode, parents: tuple[str, ...]) -> None:
+            path_parts = (*parents, node.name)
+            path = '/'.join(path_parts)
+            if path in seen_paths:
+                raise ValueError(f'duplicate target path: {path}')
+            seen_paths.add(path)
+
+            generated_id = _slugify(path)
+            if generated_id in seen_ids:
+                raise ValueError(f'duplicate target id: {generated_id}')
+            seen_ids.add(generated_id)
+
+            for child in node.children:
+                walk(child, path_parts)
+
+        for target in self.targets:
+            walk(target, ())
+
+        return self
 
 
 

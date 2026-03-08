@@ -19,6 +19,18 @@ def test_tree_endpoint_uses_yaml_config() -> None:
 
 
 
+def test_collector_status_endpoint_returns_runtime_state() -> None:
+    with TestClient(app) as client:
+        response = client.get('/api/collector/status')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert 'status' in payload
+    assert 'lastSuccessAt' in payload
+    assert 'lastRoundSummary' in payload
+
+
+
 def test_target_detail_is_backed_by_database_sync() -> None:
     with TestClient(app) as client:
         response = client.get('/api/targets/examples-example-target')
@@ -27,6 +39,7 @@ def test_target_detail_is_backed_by_database_sync() -> None:
     payload = response.json()
     assert payload['id'] == 'examples-example-target'
     assert payload['enabled'] is True
+    assert 'recentMeasurements' in payload
 
 
 

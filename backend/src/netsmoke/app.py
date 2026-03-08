@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 
 from netsmoke.api.routes import router
-from netsmoke.collector.service import CollectorService
+from netsmoke.collector.service import CollectorService, initialize_collector_runtime_state
 from netsmoke.db.init import initialize_database
 from netsmoke.services.targets import sync_config_targets
 from netsmoke.settings import settings
@@ -16,6 +16,7 @@ from netsmoke.settings import settings
 async def lifespan(_: FastAPI):
     await initialize_database()
     await sync_config_targets()
+    initialize_collector_runtime_state(settings.collector_enabled)
 
     collector_task: asyncio.Task[None] | None = None
     if settings.collector_enabled:
