@@ -142,13 +142,6 @@ Options:
 
 When both `start` and `end` are present on the graph endpoint, `range` is ignored.
 
-### Graph rendering (`graph.py`)
-
-- `render_graph_for_target(db, target, time_range)` — named-range entry point; thin wrapper around `render_graph_for_window`
-- `render_graph_for_window(db, target, start_ts, end_ts)` — canonical path: queries DB, builds RTT matrix, renders PNG
-- `render_graph(timestamps, rtt_matrix, loss_pcts, start_ts, end_ts)` — pure matplotlib renderer; x-axis always pinned to the requested window
-- `_locator_and_format(duration_s)` — returns the right matplotlib tick locator/formatter for the window duration
-
 ### Testing
 
 ```bash
@@ -184,8 +177,6 @@ Drag across any graph panel to select a time range. This opens a single-graph **
 - **Zoom out** — doubles the displayed duration, centered on the current midpoint
 - Drag-to-zoom — same interaction works within the zoom view for further drill-down
 - **Back** — returns to the 4-panel view
-
-The drag overlay maps pixel X coordinates linearly to Unix timestamps using the panel's known `startTs`/`endTs`. Matplotlib's Y-axis margin means the edges are slightly imprecise; use the datetime inputs to fine-tune.
 
 Clicking a different target in the sidebar while in zoom view resets back to the 4-panel view.
 
