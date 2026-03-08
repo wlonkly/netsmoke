@@ -43,7 +43,7 @@ Write the backend in python.  Use "uv" to create a virtualenv to work in and to 
 
 Write the frontend in React. We will choose a CSS library as we plan the app (or use plain CSS if that's better).
 
-While developing, run the application in Docker, never directly on this Mac.  If this interferes with our ability to do pings, tell me.  If docker is not running, start it with `colima start`.
+While developing, prefer Docker for general app work, but run the backend directly on this Mac when you need trustworthy ICMP latency measurements. Colima distorts RTTs for this workload, so host-based backend development is the default for latency validation. If Docker is not running and you still want the container stack, start it with `colima start`.
 
 For now, use sqlite as the datastore.  If we need to use sample data during development of the frontend and web backend, that's fine. Later we may add postgres timescaledb as an option.
 
