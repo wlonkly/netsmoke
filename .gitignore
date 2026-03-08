@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 node_modules/
 backend/.venv/
+backend/uv.lock
 backend/.pytest_cache/
 backend/.ruff_cache/
 frontend/node_modules/
