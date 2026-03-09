@@ -111,3 +111,11 @@ build:
 install:
     cd backend && uv sync --all-groups
     cd frontend && npm install
+
+# Import SmokePing RRD data directory into netsmoke
+import-smokeping data_dir targets_file db="netsmoke.db" config="config.yaml":
+    cd importer && uv run smokeping-import \
+        --data-dir "{{data_dir}}" \
+        --targets-file "{{targets_file}}" \
+        --db "../{{db}}" \
+        --config "../{{config}}"
