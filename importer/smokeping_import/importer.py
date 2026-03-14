@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from netsmoke.db import CREATE_INDEX_SQL, CREATE_TABLE_SQL
+from netsmoke.db import (
+    CREATE_INDEX_SQL,
+    CREATE_ROLLUP_INDEX_SQL,
+    CREATE_ROLLUP_TABLE_SQL,
+    CREATE_TABLE_SQL,
+)
 
 from .rrd_parser import RRDMeta, dump_rrd, iter_rows_finest_first, parse_rrd_header
 
@@ -33,6 +38,8 @@ def open_db(db_path: str) -> sqlite3.Connection:
         db.execute(pragma)
     db.execute(CREATE_TABLE_SQL)
     db.execute(CREATE_INDEX_SQL)
+    db.execute(CREATE_ROLLUP_TABLE_SQL)
+    db.execute(CREATE_ROLLUP_INDEX_SQL)
     db.commit()
     return db
 
@@ -113,6 +120,91 @@ def import_rrd(
         "start_date": _fmt_ts(min_ts),
         "end_date": _fmt_ts(max_ts),
         "dry_run": dry_run,
+    }
+
+
+def backfill_rollups(db: sqlite3.Connection, ping_count: int) -> dict:
+    """
+    Compute rollup rows for all data in ping_samples.
+
+    Iterates over every target, groups samples into hour and day buckets,
+    sub-samples to ping_count values, and upserts into ping_rollups.
+    Returns a stats dict with bucket counts per size.
+    """
+    import json
+
+    targets = [
+        r[0] for r in db.execute("SELECT DISTINCT target FROM ping_samples").fetchall()
+    ]
+
+    total_hour = 0
+    total_day = 0
+
+    for target in targets:
+        for bucket_size, duration in [("hour", 3600), ("day", 86400)]:
+            # Fetch all rows for this target sorted by bucket then RTT.
+            # In SQLite, ORDER BY rtt_ms ASC puts NULLs first, so filtering
+            # them out leaves the non-null values already in ascending order.
+            rows = db.execute(
+                """
+                SELECT (time / ?) * ? AS bucket_start, rtt_ms
+                FROM ping_samples
+                WHERE target = ?
+                ORDER BY bucket_start, rtt_ms
+                """,
+                (duration, duration, target),
+            ).fetchall()
+
+            # Group by bucket_start
+            buckets: dict[int, list] = {}
+            for bucket_start, rtt_ms in rows:
+                buckets.setdefault(bucket_start, []).append(rtt_ms)
+
+            batch = []
+            for bucket_start, rtts in sorted(buckets.items()):
+                total_count = len(rtts)
+                received = [r for r in rtts if r is not None]
+                loss_count = total_count - len(received)
+
+                if len(received) > ping_count:
+                    if ping_count == 1:
+                        received = [received[len(received) // 2]]
+                    else:
+                        indices = [
+                            round(i * (len(received) - 1) / (ping_count - 1))
+                            for i in range(ping_count)
+                        ]
+                        received = [received[i] for i in indices]
+
+                batch.append((
+                    target, bucket_start, bucket_size,
+                    json.dumps(received), loss_count, total_count,
+                ))
+
+            if batch:
+                db.executemany(
+                    """
+                    INSERT INTO ping_rollups
+                        (target, bucket_start, bucket_size, sorted_rtts, loss_count, total_count)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (target, bucket_start, bucket_size) DO UPDATE SET
+                        sorted_rtts = excluded.sorted_rtts,
+                        loss_count  = excluded.loss_count,
+                        total_count = excluded.total_count
+                    """,
+                    batch,
+                )
+                db.commit()
+
+                if bucket_size == "hour":
+                    total_hour += len(batch)
+                else:
+                    total_day += len(batch)
+
+    return {
+        "targets": len(targets),
+        "hour_buckets": total_hour,
+        "day_buckets": total_day,
     }
 
 
