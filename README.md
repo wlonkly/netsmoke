@@ -41,7 +41,7 @@ The backend runs with `NETSMOKE_COLLECTOR_ENABLED=true`, auto-resolves the repo 
 ## Current state
 
 - The backend now runs as a long-lived FastAPI service that loads YAML config, syncs targets into SQLite, collects ICMP samples with `fping`, stores measurement rounds plus raw ping samples, and renders SmokePing-style SVG graphs from persisted data.
-- The frontend now shows the configured target tree, target detail, graph range selector, collector status, and recent measurement rounds, with automatic refresh during development.
+- The frontend now shows the configured target tree, target detail, Day/Week/Month/Year graph range selector, collector status, and recent measurement rounds, with automatic refresh during development.
 - Local macOS backend development is now the recommended path for trustworthy latency measurements on this machine.
 
 ## Known caveats
