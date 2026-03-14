@@ -8,11 +8,13 @@ import pytest
 import pytest_asyncio
 import aiosqlite
 
-from netsmoke.db import open_db, insert_samples
+from netsmoke.db import open_db, insert_samples, update_rollup
 from netsmoke.graph import (
     RANGE_SECONDS,
+    RANGE_BUCKET_SIZE,
     _loss_color,
     build_rtt_matrix,
+    build_rollup_rtt_matrix,
     calculate_smoke_bands,
     render_graph,
     render_graph_for_target,
@@ -171,3 +173,64 @@ def test_range_seconds_values():
     assert RANGE_SECONDS["2d"]  == 2 * 24 * 3600
     assert RANGE_SECONDS["1mo"] == 30 * 24 * 3600
     assert RANGE_SECONDS["1y"]  == 365 * 24 * 3600
+
+
+# --- Rollup matrix tests ---
+
+def test_build_rollup_rtt_matrix_basic():
+    now = int(time.time())
+    rollup_rows = [
+        {"bucket_start": now, "sorted_rtts": [10.0, 12.0, 15.0], "loss_count": 1, "total_count": 4},
+        {"bucket_start": now + 3600, "sorted_rtts": [11.0, 13.0, 16.0], "loss_count": 0, "total_count": 3},
+    ]
+    timestamps, matrix, loss_pcts = build_rollup_rtt_matrix(rollup_rows, num_pings=3)
+
+    assert len(timestamps) == 2
+    assert matrix.shape == (2, 3)
+    assert loss_pcts[0] == pytest.approx(0.25)
+    assert loss_pcts[1] == 0.0
+
+
+def test_build_rollup_rtt_matrix_empty():
+    timestamps, matrix, loss_pcts = build_rollup_rtt_matrix([], num_pings=20)
+    assert len(timestamps) == 0
+    assert matrix.shape == (0, 20)
+
+
+# --- Rollup integration tests ---
+
+@pytest_asyncio.fixture
+async def rollup_seeded_db(tmp_path):
+    path = str(tmp_path / "rollup_test.db")
+    db = await open_db(path)
+
+    now = int(time.time())
+    for i in range(10):
+        ts = now - (9 - i) * 3600
+        rtts = [10.0 + j + i * 0.1 for j in range(20)]
+        if i % 5 == 0:
+            rtts[0] = None
+        await insert_samples(db, "CDNs/Cloudflare", ts, rtts)
+        await update_rollup(db, "CDNs/Cloudflare", ts, "hour", 20)
+        await update_rollup(db, "CDNs/Cloudflare", ts, "day", 20)
+
+    yield db
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_render_graph_for_target_uses_rollups_for_1mo(rollup_seeded_db):
+    result = await render_graph_for_target(
+        rollup_seeded_db, "CDNs/Cloudflare", "1mo", num_pings=20
+    )
+    assert isinstance(result, bytes)
+    assert result[:4] == b"\x89PNG"
+
+
+@pytest.mark.asyncio
+async def test_render_graph_for_target_uses_rollups_for_1y(rollup_seeded_db):
+    result = await render_graph_for_target(
+        rollup_seeded_db, "CDNs/Cloudflare", "1y", num_pings=20
+    )
+    assert isinstance(result, bytes)
+    assert result[:4] == b"\x89PNG"

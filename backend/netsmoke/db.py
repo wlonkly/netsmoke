@@ -6,6 +6,7 @@ Schema is designed to be compatible with future migration to PostgreSQL + Timesc
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Optional
 
@@ -28,11 +29,36 @@ CREATE INDEX IF NOT EXISTS idx_ping_samples_target_time
     ON ping_samples (target, time);
 """
 
+CREATE_ROLLUP_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS ping_rollups (
+    id           INTEGER PRIMARY KEY,
+    target       TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,
+    bucket_size  TEXT NOT NULL,        -- "hour" or "day"
+    sorted_rtts  TEXT NOT NULL,        -- JSON array, pre-sorted, non-null only
+    loss_count   INTEGER NOT NULL,
+    total_count  INTEGER NOT NULL,
+    UNIQUE (target, bucket_start, bucket_size)
+);
+"""
+
+CREATE_ROLLUP_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_ping_rollups_target_bucket
+    ON ping_rollups (target, bucket_start, bucket_size);
+"""
+
+_BUCKET_DURATIONS = {
+    "hour": 3600,
+    "day":  86400,
+}
+
 
 async def init_db(db: aiosqlite.Connection) -> None:
     """Create tables and indexes if they don't exist."""
     await db.execute(CREATE_TABLE_SQL)
     await db.execute(CREATE_INDEX_SQL)
+    await db.execute(CREATE_ROLLUP_TABLE_SQL)
+    await db.execute(CREATE_ROLLUP_INDEX_SQL)
     await db.commit()
 
 
@@ -139,3 +165,82 @@ async def prune_old_data(db: aiosqlite.Connection, days: int = 365) -> int:
     )
     await db.commit()
     return cursor.rowcount
+
+
+async def update_rollup(
+    db: aiosqlite.Connection,
+    target: str,
+    probe_timestamp: int,
+    bucket_size: str,
+    pings: int,
+) -> None:
+    """
+    Compute and upsert a rollup row for the bucket containing probe_timestamp.
+
+    bucket_size: "hour" or "day"
+    pings: maximum number of RTT values to store in sorted_rtts
+    """
+    duration = _BUCKET_DURATIONS[bucket_size]
+    bucket_start = (probe_timestamp // duration) * duration
+    bucket_end = bucket_start + duration
+
+    rows = await query_samples(db, target, bucket_start, bucket_end - 1)
+    all_rtts = [r[2] for r in rows]
+    total_count = len(all_rtts)
+    received = sorted(r for r in all_rtts if r is not None)
+    loss_count = total_count - len(received)
+
+    # Sub-sample to at most `pings` values using evenly-spaced indices
+    if len(received) > pings:
+        if pings == 1:
+            received = [received[len(received) // 2]]
+        else:
+            indices = [round(i * (len(received) - 1) / (pings - 1)) for i in range(pings)]
+            received = [received[i] for i in indices]
+
+    await db.execute(
+        """
+        INSERT INTO ping_rollups (target, bucket_start, bucket_size, sorted_rtts, loss_count, total_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (target, bucket_start, bucket_size) DO UPDATE SET
+            sorted_rtts = excluded.sorted_rtts,
+            loss_count  = excluded.loss_count,
+            total_count = excluded.total_count
+        """,
+        (target, bucket_start, bucket_size, json.dumps(received), loss_count, total_count),
+    )
+    await db.commit()
+
+
+async def query_rollups(
+    db: aiosqlite.Connection,
+    target: str,
+    start: int,
+    end: int,
+    bucket_size: str,
+) -> list[dict]:
+    """
+    Return rollup rows for a target in [start, end] time range.
+
+    Returns list of dicts:
+        {"bucket_start": int, "sorted_rtts": list[float], "loss_count": int, "total_count": int}
+    """
+    async with db.execute(
+        """
+        SELECT bucket_start, sorted_rtts, loss_count, total_count
+        FROM ping_rollups
+        WHERE target = ? AND bucket_size = ? AND bucket_start >= ? AND bucket_start <= ?
+        ORDER BY bucket_start
+        """,
+        (target, bucket_size, start, end),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [
+        {
+            "bucket_start": int(r[0]),
+            "sorted_rtts": json.loads(r[1]),
+            "loss_count": int(r[2]),
+            "total_count": int(r[3]),
+        }
+        for r in rows
+    ]
