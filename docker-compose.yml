@@ -1,0 +1,14 @@
+services:
+  netsmoke:
+    build: .
+    ports:
+      - "8000:8000"
+    cap_add:
+      - NET_RAW  # required for fping to send raw ICMP packets
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - netsmoke-data:/data
+    restart: unless-stopped
+
+volumes:
+  netsmoke-data:
