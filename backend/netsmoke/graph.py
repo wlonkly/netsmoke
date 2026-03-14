@@ -25,6 +25,13 @@ RANGE_SECONDS = {
     "1y":  365 * 24 * 3600,
 }
 
+RANGE_BUCKET_SIZE = {
+    "3h":  None,
+    "2d":  None,
+    "1mo": "hour",
+    "1y":  "day",
+}
+
 
 def _loss_color(loss_pct: float) -> str:
     """
@@ -123,6 +130,34 @@ def build_rtt_matrix(
 
         for j, rtt in enumerate(received[:num_pings]):
             rtt_matrix[i, j] = rtt
+
+    return timestamps, rtt_matrix, loss_pcts
+
+
+def build_rollup_rtt_matrix(
+    rollup_rows: list[dict],
+    num_pings: int,
+) -> tuple[list[datetime], np.ndarray, np.ndarray]:
+    """
+    Convert rollup dicts → (timestamps, rtt_matrix, loss_pcts).
+
+    rollup_rows: list of dicts with keys bucket_start, sorted_rtts, loss_count, total_count
+    Returns same tuple as build_rtt_matrix.
+    """
+    if not rollup_rows:
+        return [], np.empty((0, num_pings)), np.empty(0)
+
+    n = len(rollup_rows)
+    timestamps = [datetime.fromtimestamp(r["bucket_start"], tz=timezone.utc) for r in rollup_rows]
+    rtt_matrix = np.full((n, num_pings), np.nan)
+    loss_pcts = np.zeros(n)
+
+    for i, row in enumerate(rollup_rows):
+        rtts = row["sorted_rtts"]
+        for j, rtt in enumerate(rtts[:num_pings]):
+            rtt_matrix[i, j] = rtt
+        total = row["total_count"]
+        loss_pcts[i] = row["loss_count"] / total if total > 0 else 0.0
 
     return timestamps, rtt_matrix, loss_pcts
 
@@ -263,14 +298,22 @@ async def render_graph_for_window(
     start_ts: int,
     end_ts: int,
     num_pings: int = 20,
+    bucket_size: Optional[str] = None,
 ) -> bytes:
     """
     Query the DB and render a graph for the given target and exact time window.
-    """
-    from netsmoke.db import query_samples
 
-    rows = await query_samples(db, target, start_ts, end_ts)
-    timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
+    If bucket_size is provided ("hour" or "day"), queries the rollup table.
+    Otherwise queries raw ping_samples.
+    """
+    if bucket_size is None:
+        from netsmoke.db import query_samples
+        rows = await query_samples(db, target, start_ts, end_ts)
+        timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
+    else:
+        from netsmoke.db import query_rollups
+        rows = await query_rollups(db, target, start_ts, end_ts, bucket_size)
+        timestamps, rtt_matrix, loss_pcts = build_rollup_rtt_matrix(rows, num_pings)
 
     return render_graph(
         timestamps, rtt_matrix, loss_pcts,
@@ -290,6 +333,7 @@ async def render_graph_for_target(
     Query the DB and render a graph for the given target and named time range.
     """
     seconds = RANGE_SECONDS.get(time_range, RANGE_SECONDS["3h"])
+    bucket_size = RANGE_BUCKET_SIZE.get(time_range)
     end_ts = int(time.time())
     start_ts = end_ts - seconds
-    return await render_graph_for_window(db, target, start_ts, end_ts, num_pings)
+    return await render_graph_for_window(db, target, start_ts, end_ts, num_pings, bucket_size=bucket_size)

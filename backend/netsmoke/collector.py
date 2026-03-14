@@ -14,7 +14,7 @@ import time
 import aiosqlite
 
 from netsmoke.config import Config, target_full_path
-from netsmoke.db import insert_samples
+from netsmoke.db import insert_samples, update_rollup
 from netsmoke.pinger import ping_hosts
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,8 @@ async def _collect_once(config: Config, db: aiosqlite.Connection) -> None:
 
         try:
             await insert_samples(db, path, timestamp, rtts)
+            await update_rollup(db, path, timestamp, "hour", config.ping_count)
+            await update_rollup(db, path, timestamp, "day", config.ping_count)
             logger.debug("Stored %d samples for %s", len(rtts), path)
         except Exception as e:
             logger.error("Failed to store samples for %s: %s", path, e)

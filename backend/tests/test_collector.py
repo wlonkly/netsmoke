@@ -7,7 +7,7 @@ import pytest_asyncio
 
 from netsmoke.collector import _collect_once
 from netsmoke.config import Config, Target
-from netsmoke.db import open_db, query_samples
+from netsmoke.db import open_db, query_samples, query_rollups
 
 
 def _make_config(host="127.0.0.1", name="Test", ping_count=3, ping_interval=60):
@@ -97,3 +97,26 @@ async def test_collect_once_all_loss_stored_as_nones(db, monkeypatch):
     rows = await query_samples(db, "Unreachable", before - 1, int(time.time()) + 1)
     assert len(rows) == 5
     assert all(r[2] is None for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_collect_once_updates_rollups(db, monkeypatch):
+    """_collect_once creates both hour and day rollup rows for each target."""
+    config = _make_config(host="8.8.8.8", name="Google DNS", ping_count=3)
+
+    async def mock_ping(hosts, **kwargs):
+        return {"8.8.8.8": [10.0, 11.0, 12.0]}
+
+    monkeypatch.setattr("netsmoke.collector.ping_hosts", mock_ping)
+
+    before = int(time.time())
+    await _collect_once(config, db)
+    after = int(time.time())
+
+    hour_rows = await query_rollups(db, "Google DNS", 0, after + 3600, "hour")
+    day_rows = await query_rollups(db, "Google DNS", 0, after + 86400, "day")
+
+    assert len(hour_rows) == 1
+    assert len(day_rows) == 1
+    assert hour_rows[0]["total_count"] == 3
+    assert day_rows[0]["total_count"] == 3

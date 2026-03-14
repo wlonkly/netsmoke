@@ -12,6 +12,8 @@ from netsmoke.db import (
     query_samples,
     query_latest_stats,
     prune_old_data,
+    update_rollup,
+    query_rollups,
 )
 
 
@@ -104,3 +106,77 @@ async def test_sample_ordering(db):
     rows = await query_samples(db, "tgt", now - 1, now + 120)
     times = [r[0] for r in rows]
     assert times == sorted(times)
+
+
+# --- Rollup tests ---
+
+@pytest.mark.asyncio
+async def test_update_rollup_creates_row(db):
+    now = int(time.time())
+    await insert_samples(db, "tgt", now, [10.0, 20.0, None, 30.0])
+    await update_rollup(db, "tgt", now, "hour", 20)
+
+    bucket_start = (now // 3600) * 3600
+    rows = await query_rollups(db, "tgt", bucket_start, bucket_start + 3600, "hour")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["bucket_start"] == bucket_start
+    assert row["total_count"] == 4
+    assert row["loss_count"] == 1
+    assert sorted(row["sorted_rtts"]) == row["sorted_rtts"]
+    assert set(row["sorted_rtts"]) == {10.0, 20.0, 30.0}
+
+
+@pytest.mark.asyncio
+async def test_update_rollup_idempotent(db):
+    now = int(time.time())
+    await insert_samples(db, "tgt", now, [10.0, 20.0])
+    await update_rollup(db, "tgt", now, "hour", 20)
+    # Second call updates the same row — still one row
+    await update_rollup(db, "tgt", now, "hour", 20)
+
+    bucket_start = (now // 3600) * 3600
+    rows = await query_rollups(db, "tgt", bucket_start, bucket_start + 3600, "hour")
+    assert len(rows) == 1
+    assert rows[0]["total_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_update_rollup_subsamples(db):
+    now = int(time.time())
+    # Insert more RTTs than pings limit
+    rtts = [float(i) for i in range(50)]
+    await insert_samples(db, "tgt", now, rtts)
+    await update_rollup(db, "tgt", now, "hour", pings=10)
+
+    bucket_start = (now // 3600) * 3600
+    rows = await query_rollups(db, "tgt", bucket_start, bucket_start + 3600, "hour")
+    assert len(rows) == 1
+    assert len(rows[0]["sorted_rtts"]) == 10
+
+
+@pytest.mark.asyncio
+async def test_query_rollups_range(db):
+    # Insert samples across two different hours
+    hour = 3600
+    base = (int(time.time()) // hour) * hour
+    ts_h0 = base - 2 * hour + 10
+    ts_h1 = base - 1 * hour + 10
+    ts_h2 = base + 10
+
+    await insert_samples(db, "tgt", ts_h0, [1.0])
+    await update_rollup(db, "tgt", ts_h0, "hour", 20)
+
+    await insert_samples(db, "tgt", ts_h1, [2.0])
+    await update_rollup(db, "tgt", ts_h1, "hour", 20)
+
+    await insert_samples(db, "tgt", ts_h2, [3.0])
+    await update_rollup(db, "tgt", ts_h2, "hour", 20)
+
+    # Query only the middle two buckets
+    bucket_h1 = (ts_h1 // hour) * hour
+    bucket_h2 = (ts_h2 // hour) * hour
+    rows = await query_rollups(db, "tgt", bucket_h1, bucket_h2, "hour")
+    assert len(rows) == 2
+    bucket_starts = [r["bucket_start"] for r in rows]
+    assert bucket_starts == sorted(bucket_starts)

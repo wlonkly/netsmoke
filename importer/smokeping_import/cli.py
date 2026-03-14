@@ -153,6 +153,19 @@ def main() -> None:
         if targets_file and target_path not in targets_by_path:
             orphaned.append(target_path)
 
+    # --- Backfill rollups ---
+    if not dry_run and db is not None:
+        from .importer import backfill_rollups
+
+        ping_count = _detect_ping_count(rrd_files) if rrd_files else 20
+        print("\nBuilding rollup aggregates (1mo/1y graphs)...")
+        rollup_stats = backfill_rollups(db, ping_count)
+        print(
+            f"  {rollup_stats['targets']} target(s) → "
+            f"{rollup_stats['hour_buckets']:,} hour buckets, "
+            f"{rollup_stats['day_buckets']:,} day buckets"
+        )
+
     # --- Summary ---
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Import complete:")
     print(f"  {len(rrd_files)} RRD files → {grand_total_ts:,} timestamps → {grand_total_rows:,} rows")

@@ -3,7 +3,8 @@
 - [ ] Add collector status at the bottom of the sidebar
 - [ ] Add license file and credit SmokePing (derivative work, not a cleanroom implementation)
 - [ ] Update URL when zooming and unzooming so that users can link others to what they're seeing by copying the current URL
-
+- [ ] Sample data generation for a demo site, with "targets" that have different properties (like low latency, or high variation/smoke, or maybe one that has occasional degradation alternating with good performance -- all optimized for humans to see what the data looks like and for visual testing, rather than for automated code tests)
+- [ ] Drag-to-zoom always queries raw `ping_samples` regardless of window size — `render_graph_for_window` has no rollup path. For large zoom windows (e.g. a 2-week selection on a 1mo panel) this could be slow. Fix: auto-select `bucket_size` in `render_graph_for_window` based on `end_ts - start_ts` (e.g. >7d → "day", >6h → "hour") rather than only routing through rollups via `render_graph_for_target`.
 ---
 
 ## Adopted from netsmoke-claude-superpowers
