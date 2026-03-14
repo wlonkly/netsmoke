@@ -254,3 +254,18 @@ Clicking a different target in the sidebar while in zoom view resets back to the
 ## Data retention
 
 The backend prunes samples older than 365 days on startup. There is no per-target quota.
+
+## Credits
+
+Netsmoke is influenced by and based on Tobias Oetiker's
+[SmokePing](https://github.com/oetiker/SmokePing), which the author has
+used for most of his career. 
+
+## License
+
+Netsmoke is based on SmokePing and is therefore released under the same license,
+the GNU GPL v2 or later.  See [LICENSE](LICENSE) for a full copy of the
+license. 
+
+Netsmoke is copyright (c) 2026 by [Rich
+Lafferty](https://github.com/wlonkly). 
