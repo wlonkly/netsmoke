@@ -251,14 +251,14 @@ def render_graph(
             color=band["color"],
             linewidth=0,
             edgecolor="none",
+            step="mid",
         )
 
     # Median bar: a thin colored horizontal bar at the median RTT for each
     # time slot, spanning the full column width — matches SmokePing's appearance.
     medians = np.median(display_matrix, axis=1)
-    valid = medians[~np.isnan(medians) & (medians > 0)]
-    bar_h = float(np.max(valid)) * 0.04 if len(valid) > 0 else 1.0
-    bar_h = max(bar_h, 0.5)  # never thinner than 0.5 ms
+    y_max = float(np.nanmax(sorted_pings)) if sorted_pings.size > 0 else 1.0
+    bar_h = y_max * 0.04  # 4% of y range
 
     for xi, med, loss in zip(x, medians, loss_pcts):
         if not np.isnan(med) and med > 0:
