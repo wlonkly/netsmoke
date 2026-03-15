@@ -6,6 +6,12 @@ SmokePing-inspired latency monitor. A Python/FastAPI backend collects fping data
 
 ---
 
+## Tracking work
+
+For anything ticket-sized or larger (a bug fix, a feature, a refactor, an investigation), create a GitHub Issue rather than adding to a local TODO file. Use `gh issue create --repo wlonkly/netsmoke` from the CLI.
+
+---
+
 ## Dev workflow
 
 ```bash
