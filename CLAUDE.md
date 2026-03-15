@@ -14,11 +14,22 @@ just stop              # stop both
 just status            # check PIDs
 just test              # run backend test suite
 just test-frontend     # run frontend test suite
+just import-smokeping data_dir targets_file  # import SmokePing RRD data
 ```
 
 Backend: http://localhost:8000 — Frontend: http://localhost:5173
 
 Vite proxies `/api` and `/health` to `:8000` in dev (see `vite.config.js`). In production, `frontend/dist/` is served as a static site alongside the API.
+
+### SmokePing importer
+
+One-time migration tool lives in `importer/` (package `smokeping_import`). It reads SmokePing RRD files via `rrdtool dump` and bulk-inserts into `ping_samples`, then calls `backfill_rollups` to pre-compute `ping_rollups` so the 1mo/1y graphs work immediately.
+
+```bash
+just import-smokeping /path/to/smokeping/data /path/to/Targets
+```
+
+All recipes (`dev`, `run`, `import-smokeping`) use the same DB path: `netsmoke.db` at the project root. Do not call the importer CLI directly from outside the project root — the `just` recipes handle the `--db` paths correctly.
 
 ---
 
@@ -104,9 +115,48 @@ CREATE TABLE ping_samples (
     sample_num  INTEGER NOT NULL,   -- 1..N (one row per ping per measurement)
     rtt_ms      REAL                -- NULL = packet loss
 );
+
+CREATE TABLE ping_rollups (
+    id           INTEGER PRIMARY KEY,
+    target       TEXT NOT NULL,
+    bucket_start INTEGER NOT NULL,  -- Unix timestamp, aligned to bucket boundary
+    bucket_size  TEXT NOT NULL,     -- "hour" (3600s) or "day" (86400s)
+    sorted_rtts  TEXT NOT NULL,     -- JSON array, pre-sorted ascending, non-null only
+    loss_count   INTEGER NOT NULL,
+    total_count  INTEGER NOT NULL,
+    UNIQUE (target, bucket_start, bucket_size)
+);
 ```
 
-Indexed on `(target, time)`. WAL mode + `synchronous=NORMAL` for write performance. One measurement = `ping_count` rows (all at the same `time` value).
+`ping_samples` indexed on `(target, time)`. `ping_rollups` indexed on `(target, bucket_start, bucket_size)`. WAL mode + `synchronous=NORMAL` for write performance.
+
+---
+
+## Rollup strategy
+
+The 1mo and 1y graphs would be too slow to render from raw `ping_samples`. Instead, pre-aggregated rows in `ping_rollups` are used for those ranges:
+
+| Time range | Bucket size | Data source |
+|-----------|-------------|-------------|
+| 3h, 2d    | —           | `ping_samples` (raw) |
+| 1mo       | `"hour"`    | `ping_rollups` |
+| 1y        | `"day"`     | `ping_rollups` |
+
+This mapping lives in `RANGE_BUCKET_SIZE` in `graph.py`. `render_graph_for_target` reads it and passes `bucket_size` to `render_graph_for_window`, which dispatches to either `query_samples` + `build_rtt_matrix` (raw path) or `query_rollups` + `build_rollup_rtt_matrix` (rollup path).
+
+### What a rollup row holds
+
+- `sorted_rtts`: JSON array of received RTTs, pre-sorted ascending, sub-sampled to at most `ping_count` values using evenly-spaced indices
+- `loss_count` / `total_count`: used to compute loss percentage; loss values are not included in `sorted_rtts`
+- `bucket_start` is always boundary-aligned: `(timestamp // duration) * duration`
+
+### Rollup maintenance
+
+**During ongoing collection** (`collector.py`): after every probe, `update_rollup()` is called twice — once for the hour bucket, once for the day bucket. It queries the full bucket from `ping_samples`, recomputes the aggregates, and upserts via `ON CONFLICT DO UPDATE`. This means every rollup row always reflects all samples in its bucket.
+
+**After historical import** (`importer/`): `backfill_rollups()` batch-computes all hour and day buckets for all targets and upserts them in one pass. This is what makes 1mo/1y graphs usable immediately after a SmokePing migration.
+
+Raw `ping_samples` are never deleted by the rollup system. The 365-day `prune_old_data()` is the only thing that removes raw rows; rollup rows are not pruned.
 
 ---
 

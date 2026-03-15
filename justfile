@@ -43,6 +43,7 @@ dev:
 
     (cd "$root/backend" && uv run netsmoke \
         --config "$root/{{config}}" \
+        --db "$root/{{db}}" \
         --host {{host}} --port {{port}} \
         --reload) &
     echo $! > "{{piddir}}/backend.pid"
@@ -76,6 +77,7 @@ stop:
 backend:
     cd backend && uv run netsmoke \
         --config ../{{config}} \
+        --db ../{{db}} \
         --host {{host}} --port {{port}} \
         --reload
 
