@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { graphUrl, graphUrlWindow, fetchTargets, fetchStats } from '../api.js'
+import { graphUrl, graphUrlWindow, fetchTargets, fetchStats } from '../api'
 
 describe('graphUrl', () => {
   it('builds a simple target URL with default range', () => {
@@ -32,7 +32,7 @@ describe('fetchTargets', () => {
   })
 
   it('returns parsed JSON on success', async () => {
-    const targets = [{ path: '8.8.8.8', name: '8.8.8.8' }]
+    const targets = [{ type: 'target' as const, path: '8.8.8.8', name: '8.8.8.8', host: '8.8.8.8' }]
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(targets),
