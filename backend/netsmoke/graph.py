@@ -181,6 +181,7 @@ def render_graph(
     title: str = "Ping Latency",
     start_ts: int = 0,
     end_ts: int = 0,
+    bar_width_seconds: Optional[float] = None,
 ) -> bytes:
     """
     Render a smoke graph from pre-built matrices.
@@ -237,8 +238,10 @@ def render_graph(
         # Use median gap so a single outlier close/duplicate timestamp doesn't
         # shrink all bars to near-zero width.
         width = float(np.median(np.diff(x)))
+    elif bar_width_seconds is not None:
+        width = bar_width_seconds / 86400
     else:
-        width = duration_s / 86400
+        width = duration_s / 86400 / 100
 
     for band in bands:
         ax.bar(
@@ -306,20 +309,25 @@ async def render_graph_for_window(
     If bucket_size is provided ("hour" or "day"), queries the rollup table.
     Otherwise queries raw ping_samples.
     """
+    _BUCKET_SECONDS = {"hour": 3600.0, "day": 86400.0}
+
     if bucket_size is None:
         from netsmoke.db import query_samples
         rows = await query_samples(db, target, start_ts, end_ts)
         timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
+        bar_width_seconds = 60.0  # one measurement interval
     else:
         from netsmoke.db import query_rollups
         rows = await query_rollups(db, target, start_ts, end_ts, bucket_size)
         timestamps, rtt_matrix, loss_pcts = build_rollup_rtt_matrix(rows, num_pings)
+        bar_width_seconds = _BUCKET_SECONDS[bucket_size]
 
     return render_graph(
         timestamps, rtt_matrix, loss_pcts,
         title=target,
         start_ts=start_ts,
         end_ts=end_ts,
+        bar_width_seconds=bar_width_seconds,
     )
 
 
