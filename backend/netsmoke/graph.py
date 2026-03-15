@@ -244,11 +244,13 @@ def render_graph(
         width = duration_s / 86400 / 100
 
     for band in bands:
-        ax.bar(
-            x, band["height"], width=width,
-            bottom=band["bottom"],
+        ax.fill_between(
+            x,
+            band["bottom"],
+            band["bottom"] + band["height"],
             color=band["color"],
-            linewidth=0, align="center", edgecolor="none",
+            linewidth=0,
+            edgecolor="none",
         )
 
     # Median bar: a thin colored horizontal bar at the median RTT for each

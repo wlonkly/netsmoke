@@ -5,10 +5,6 @@
 - [ ] Update URL when zooming and unzooming so that users can link others to what they're seeing by copying the current URL
 - [ ] Sample data generation for a demo site, with "targets" that have different properties (like low latency, or high variation/smoke, or maybe one that has occasional degradation alternating with good performance -- all optimized for humans to see what the data looks like and for visual testing, rather than for automated code tests)
 - [ ] Drag-to-zoom always queries raw `ping_samples` regardless of window size — `render_graph_for_window` has no rollup path. For large zoom windows (e.g. a 2-week selection on a 1mo panel) this could be slow. Fix: auto-select `bucket_size` in `render_graph_for_window` based on `end_ts - start_ts` (e.g. >7d → "day", >6h → "hour") rather than only routing through rollups via `render_graph_for_target`.
-- [ ] Graph range should be set to make the data appear in the middle of the graph at highest, or lower if necessary to display the smoke
-- [ ] When a user clicks another target in the UI, there should be a noticeable "update" action and all of the graphs for the new target should appear at the same time, not fetched and displayed one at a time.
-- [ ] justfile target to build and upload a docker image to ghcr.io
-- [ ] The frontend hits /api/health and gets a 404 error. why?
 ---
 
 ## Adopted from netsmoke-claude-superpowers
