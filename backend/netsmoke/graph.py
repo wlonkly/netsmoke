@@ -251,6 +251,7 @@ def render_graph(
             color=band["color"],
             linewidth=0,
             edgecolor="none",
+            step="mid",
         )
 
     # Median bar: a thin colored horizontal bar at the median RTT for each
