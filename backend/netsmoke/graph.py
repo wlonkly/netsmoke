@@ -16,6 +16,7 @@ import matplotlib
 matplotlib.use("Agg")  # non-interactive backend, must be set before pyplot import
 from matplotlib.figure import Figure
 import matplotlib.dates as mdates
+from matplotlib.patches import Patch
 import numpy as np
 from datetime import datetime, timezone
 
@@ -308,28 +309,32 @@ def render_graph(
             step="mid",
         )
 
-    # Median bar: a thin colored horizontal bar at the median RTT for each
-    # time slot, spanning the full column width — matches SmokePing's appearance.
+    _style_axes(fig, ax, title, duration_s)
+
+    # Median lines: a thin horizontal line at the median RTT for each
+    # time slot, colored by loss percentage — matches SmokePing's appearance.
     medians = np.median(display_matrix, axis=1)
     valid_mask = ~np.isnan(medians) & (medians > 0)
     valid_meds = medians[valid_mask]
-
-    y_max = float(np.nanmax(sorted_pings)) if sorted_pings.size > 0 else 1.0
-    bar_h = y_max * 0.04  # 4% of y range
-
     valid_x = x[valid_mask]
-    valid_bottom = valid_meds - bar_h / 2
     valid_colors = [_loss_color(l * 100) for l in loss_pcts[valid_mask]]
 
-    ax.bar(
-        valid_x, [bar_h] * len(valid_x), width=width,
-        bottom=valid_bottom,
-        color=valid_colors,
-        linewidth=0, align="center", edgecolor="none",
-        zorder=100,
-    )
+    ax.hlines(valid_meds, valid_x - width / 2, valid_x + width / 2,
+              colors=valid_colors, linewidth=2, zorder=100)
 
-    _style_axes(fig, ax, title, duration_s)
+    legend_elements = [
+        Patch(color="#00cc00", label="0% loss"),
+        Patch(color="#0000ff", label="25%"),
+        Patch(color="#800080", label="50%"),
+        Patch(color="#ffa500", label="75%"),
+        Patch(color="#ff0000", label="100%"),
+    ]
+    ax.legend(
+        handles=legend_elements, title="Loss",
+        loc="upper right", bbox_to_anchor=(1.0, -0.15),
+        ncol=5, fontsize=7, title_fontsize=8,
+        framealpha=0.8, edgecolor="#ccccdd",
+    )
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
@@ -354,6 +359,7 @@ def _style_axes(fig: Figure, ax, title: str, duration_s: float) -> None:
     ax.xaxis.set_major_formatter(formatter)
 
     fig.autofmt_xdate(rotation=30, ha="right")
+    fig.subplots_adjust(bottom=0.15)
 
 
 async def render_graph_for_window(
