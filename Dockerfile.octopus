@@ -1,0 +1,48 @@
+# Dockerfile for octopus.local — a home server running an AMD E-450 (Bobcat, 2011)
+# that lacks SSE4.1/SSE4.2. numpy 2.x defaults to X86_V2 baseline which requires
+# SSE4.1, so we build numpy from source with -Dcpu-baseline=none to strip all SIMD
+# requirements. build-essential is needed for the C compiler during that source build.
+# The --platform=linux/amd64 pins are here so this image can be cross-built on other
+# architectures and still produce an amd64 image for octopus.
+
+# Stage 1: build the React frontend
+FROM --platform=linux/amd64 node:22-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: final image
+FROM --platform=linux/amd64 python:3.12-slim
+
+# fping needs setuid root to send raw ICMP; NET_RAW capability handles this in Docker
+RUN apt-get update && apt-get install -y --no-install-recommends fping curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Install Python dependencies (no dev extras)
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --no-dev --frozen --no-binary-package numpy \
+    --config-settings "setup-args=-Dcpu-baseline=none"
+
+# Copy application source
+COPY backend/netsmoke/ ./netsmoke/
+
+# Copy built frontend
+COPY --from=frontend-builder /app/frontend/dist/ /app/static/
+
+# Runtime configuration
+ENV NETSMOKE_STATIC_DIR=/app/static
+ENV NETSMOKE_CONFIG=/config/config.yaml
+ENV NETSMOKE_DB=/data/netsmoke.db
+
+EXPOSE 8000
+
+CMD ["/app/.venv/bin/python", "-m", "netsmoke.main", "--config", "/config/config.yaml", "--db", "/data/netsmoke.db"]

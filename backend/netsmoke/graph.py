@@ -231,6 +231,7 @@ def render_graph(
     title: str = "Ping Latency",
     start_ts: int = 0,
     end_ts: int = 0,
+    bar_width_seconds: Optional[float] = None,
 ) -> bytes:
     """
     Render a smoke graph from pre-built matrices.
@@ -291,15 +292,20 @@ def render_graph(
         # Use median gap so a single outlier close/duplicate timestamp doesn't
         # shrink all bars to near-zero width.
         width = float(np.median(np.diff(x)))
+    elif bar_width_seconds is not None:
+        width = bar_width_seconds / 86400
     else:
-        width = duration_s / 86400
+        width = duration_s / 86400 / 100
 
     for band in bands:
-        ax.bar(
-            x, band["height"], width=width,
-            bottom=band["bottom"],
+        ax.fill_between(
+            x,
+            band["bottom"],
+            band["bottom"] + band["height"],
             color=band["color"],
-            linewidth=0, align="center", edgecolor="none",
+            linewidth=0,
+            edgecolor="none",
+            step="mid",
         )
 
     # Median bar: a thin colored horizontal bar at the median RTT for each
@@ -307,10 +313,9 @@ def render_graph(
     medians = np.median(display_matrix, axis=1)
     valid_mask = ~np.isnan(medians) & (medians > 0)
     valid_meds = medians[valid_mask]
-    if len(valid_meds) == 0:
-        bar_h = 1.0
-    else:
-        bar_h = max(float(np.max(valid_meds)) * 0.04, 0.5)
+
+    y_max = float(np.nanmax(sorted_pings)) if sorted_pings.size > 0 else 1.0
+    bar_h = y_max * 0.04  # 4% of y range
 
     valid_x = x[valid_mask]
     valid_bottom = valid_meds - bar_h / 2
@@ -376,6 +381,8 @@ async def render_graph_for_window(
     if cached is not None:
         return cached
 
+    _BUCKET_SECONDS = {"hour": 3600.0, "day": 86400.0}
+
     if bucket_size is None:
         # Sub-sample at the SQL level: estimate total timestamps from the
         # window size and add a modulo filter so SQLite only returns ~1/step
@@ -395,10 +402,12 @@ async def render_graph_for_window(
             from netsmoke.db import query_samples
             rows = await query_samples(db, target, start_ts, end_ts)
         timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
+        bar_width_seconds = 60.0  # one measurement interval
     else:
         from netsmoke.db import query_rollups
         rows = await query_rollups(db, target, start_ts, end_ts, bucket_size)
         timestamps, rtt_matrix, loss_pcts = build_rollup_rtt_matrix(rows, num_pings)
+        bar_width_seconds = _BUCKET_SECONDS[bucket_size]
 
     # Offload matplotlib rendering to a thread so it doesn't block the
     # asyncio event loop. Other requests (health, targets, stats) can
@@ -406,6 +415,7 @@ async def render_graph_for_window(
     png_bytes = await asyncio.to_thread(
         render_graph, timestamps, rtt_matrix, loss_pcts,
         title=target, start_ts=start_ts, end_ts=end_ts,
+        bar_width_seconds=bar_width_seconds,
     )
     _graph_cache.set(cache_key, png_bytes)
     return png_bytes

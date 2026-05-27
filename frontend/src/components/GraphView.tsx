@@ -1,38 +1,55 @@
 import { useState, useEffect } from 'react'
-import { graphUrl, fetchStats } from '../api.js'
+import { graphUrl, fetchStats } from '../api'
+import type { TargetNode, Stats, TimeRange } from '../types'
 
-const RANGE_SECONDS = {
+const RANGE_SECONDS: Record<TimeRange, number> = {
   '3h':  3 * 3600,
   '2d':  2 * 24 * 3600,
   '1mo': 30 * 24 * 3600,
   '1y':  365 * 24 * 3600,
 }
 
-const RANGES = [
+const RANGES: Array<{ value: TimeRange; label: string }> = [
   { value: '3h',  label: '3 hours' },
   { value: '2d',  label: '2 days' },
   { value: '1mo', label: '1 month' },
   { value: '1y',  label: '1 year' },
 ]
 
-function GraphPanel({ target, range, label, imgKey, startTs, endTs, onZoom }) {
-  const url = graphUrl(target.path, range) + `&_k=${imgKey}`
-  const [drag, setDrag] = useState(null)
+interface DragState {
+  x0: number
+  x1: number
+  containerWidth: number
+}
 
-  function handleMouseDown(e) {
+interface GraphPanelProps {
+  target: TargetNode
+  range: TimeRange
+  label: string
+  imgKey: number
+  startTs: number
+  endTs: number
+  onZoom?: (startTs: number, endTs: number) => void
+}
+
+function GraphPanel({ target, range, label, imgKey, startTs, endTs, onZoom }: GraphPanelProps) {
+  const url = graphUrl(target.path, range) + `&_k=${imgKey}`
+  const [drag, setDrag] = useState<DragState | null>(null)
+
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
     setDrag({ x0: x, x1: x, containerWidth: rect.width })
   }
 
-  function handleMouseMove(e) {
+  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
     if (!drag) return
     const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
-    setDrag((d) => ({ ...d, x1: x }))
+    setDrag((d) => (d ? { ...d, x1: x } : d))
   }
 
-  function handleMouseUp(e) {
+  function handleMouseUp() {
     if (!drag) return
     const { x0, x1, containerWidth } = drag
     setDrag(null)
@@ -71,10 +88,15 @@ function GraphPanel({ target, range, label, imgKey, startTs, endTs, onZoom }) {
   )
 }
 
-export default function GraphView({ target, onZoom }) {
+interface GraphViewProps {
+  target: TargetNode | null
+  onZoom: (startTs: number, endTs: number) => void
+}
+
+export default function GraphView({ target, onZoom }: GraphViewProps) {
   const [imgKey, setImgKey] = useState(0)
-  const [stats, setStats] = useState(null)
-  const [statsError, setStatsError] = useState(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
 
   // Reload all graphs when target changes
   useEffect(() => {
@@ -94,7 +116,7 @@ export default function GraphView({ target, onZoom }) {
     setStatsError(null)
     fetchStats(target.path)
       .then(setStats)
-      .catch((e) => setStatsError(e.message))
+      .catch((e: Error) => setStatsError(e.message))
   }, [target])
 
   if (!target) {
@@ -125,7 +147,7 @@ export default function GraphView({ target, onZoom }) {
               </span>
               <span className="stat">
                 <span className="stat-label">loss</span>
-                <span className={`stat-value ${stats.loss_pct > 0 ? 'loss-nonzero' : ''}`}>
+                <span className={`stat-value ${stats.loss_pct != null && stats.loss_pct > 0 ? 'loss-nonzero' : ''}`}>
                   {stats.loss_pct != null ? `${stats.loss_pct}%` : '—'}
                 </span>
               </span>

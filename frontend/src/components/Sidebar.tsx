@@ -1,6 +1,21 @@
 import { useState } from 'react'
+import type { TreeNode, FolderNode, TargetNode } from '../types'
 
-function FolderNode({ node, activePath, onSelect, depth = 0 }) {
+interface FolderItemProps {
+  node: FolderNode
+  activePath: string | null
+  onSelect: (node: TargetNode) => void
+  depth?: number
+}
+
+interface TargetItemProps {
+  node: TargetNode
+  activePath: string | null
+  onSelect: (node: TargetNode) => void
+  depth?: number
+}
+
+function FolderItem({ node, activePath, onSelect, depth = 0 }: FolderItemProps) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -17,7 +32,7 @@ function FolderNode({ node, activePath, onSelect, depth = 0 }) {
         <div className="folder-children">
           {node.children.map((child) =>
             child.type === 'folder' ? (
-              <FolderNode
+              <FolderItem
                 key={child.path}
                 node={child}
                 activePath={activePath}
@@ -25,7 +40,7 @@ function FolderNode({ node, activePath, onSelect, depth = 0 }) {
                 depth={depth + 1}
               />
             ) : (
-              <TargetNode
+              <TargetItem
                 key={child.path}
                 node={child}
                 activePath={activePath}
@@ -40,7 +55,7 @@ function FolderNode({ node, activePath, onSelect, depth = 0 }) {
   )
 }
 
-function TargetNode({ node, activePath, onSelect, depth = 0 }) {
+function TargetItem({ node, activePath, onSelect, depth = 0 }: TargetItemProps) {
   const isActive = activePath === node.path
   return (
     <button
@@ -53,7 +68,15 @@ function TargetNode({ node, activePath, onSelect, depth = 0 }) {
   )
 }
 
-export default function Sidebar({ tree, activePath, onSelect, loading, error }) {
+interface SidebarProps {
+  tree: TreeNode[] | null
+  activePath: string | null
+  onSelect: (node: TargetNode) => void
+  loading: boolean
+  error?: string | null
+}
+
+export default function Sidebar({ tree, activePath, onSelect, loading, error }: SidebarProps) {
   if (loading) return <div className="sidebar-status">Loading...</div>
   if (error) return <div className="sidebar-status sidebar-error">Error: {error}</div>
   if (!tree || tree.length === 0) return <div className="sidebar-status">No targets</div>
@@ -64,14 +87,14 @@ export default function Sidebar({ tree, activePath, onSelect, loading, error }) 
       <div className="sidebar-tree">
         {tree.map((node) =>
           node.type === 'folder' ? (
-            <FolderNode
+            <FolderItem
               key={node.path}
               node={node}
               activePath={activePath}
               onSelect={onSelect}
             />
           ) : (
-            <TargetNode
+            <TargetItem
               key={node.path}
               node={node}
               activePath={activePath}

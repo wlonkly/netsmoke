@@ -1,29 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import App from '../App.jsx'
-import { fetchTargets, fetchStats } from '../api.js'
+import App from '../App'
+import { fetchTargets, fetchStats } from '../api'
+import type { TargetNode } from '../types'
 
 // Keep graphUrl / graphUrlWindow as real implementations; only mock the fetch calls.
-vi.mock('../api.js', async (importActual) => {
-  const actual = await importActual()
+vi.mock('../api', async (importActual) => {
+  const actual = await importActual<typeof import('../api')>()
   return { ...actual, fetchTargets: vi.fn(), fetchStats: vi.fn() }
 })
 
-const TARGET = { type: 'target', path: '8.8.8.8', name: 'Google DNS', host: '8.8.8.8' }
-const TARGET2 = { type: 'target', path: '1.1.1.1', name: 'Cloudflare DNS', host: '1.1.1.1' }
+const TARGET: TargetNode = { type: 'target', path: '8.8.8.8', name: 'Google DNS', host: '8.8.8.8' }
+const TARGET2: TargetNode = { type: 'target', path: '1.1.1.1', name: 'Cloudflare DNS', host: '1.1.1.1' }
 const FOLDER_TREE = [{
-  type: 'folder', path: 'CDNs', name: 'CDNs',
-  children: [{ type: 'target', path: 'CDNs/Cloudflare', name: 'Cloudflare', host: '1.1.1.1' }],
+  type: 'folder' as const, path: 'CDNs', name: 'CDNs',
+  children: [{ type: 'target' as const, path: 'CDNs/Cloudflare', name: 'Cloudflare', host: '1.1.1.1' }],
 }]
 
 beforeEach(() => {
   vi.resetAllMocks()
-  fetchStats.mockResolvedValue({ median_ms: 12.3, loss_pct: 0, sample_count: 10 })
+  vi.mocked(fetchStats).mockResolvedValue({ median_ms: 12.3, loss_pct: 0, sample_count: 10 })
 })
 
 // Trigger a drag on the first .graph-drag-overlay large enough to fire onZoom.
-function dragOnFirstOverlay(container) {
-  const overlay = container.querySelector('.graph-drag-overlay')
+function dragOnFirstOverlay(container: HTMLElement) {
+  const overlay = container.querySelector('.graph-drag-overlay') as HTMLElement
   overlay.getBoundingClientRect = vi.fn().mockReturnValue({
     left: 0, width: 500, top: 0, right: 500, bottom: 100, height: 100,
   })
@@ -34,26 +35,26 @@ function dragOnFirstOverlay(container) {
 
 describe('App initial load', () => {
   it('auto-selects the first flat target', async () => {
-    fetchTargets.mockResolvedValue([TARGET])
+    vi.mocked(fetchTargets).mockResolvedValue([TARGET])
     render(<App />)
     // Graph header shows the selected target name
     expect(await screen.findByText('Google DNS', { selector: '.graph-target-name' })).toBeInTheDocument()
   })
 
   it('auto-selects the first target inside a folder', async () => {
-    fetchTargets.mockResolvedValue(FOLDER_TREE)
+    vi.mocked(fetchTargets).mockResolvedValue(FOLDER_TREE)
     render(<App />)
     expect(await screen.findByText('Cloudflare', { selector: '.graph-target-name' })).toBeInTheDocument()
   })
 
   it('shows an error in the sidebar when the fetch fails', async () => {
-    fetchTargets.mockRejectedValue(new Error('timeout'))
+    vi.mocked(fetchTargets).mockRejectedValue(new Error('timeout'))
     render(<App />)
     expect(await screen.findByText(/timeout/)).toBeInTheDocument()
   })
 
   it('renders GraphView (not ZoomView) on initial load', async () => {
-    fetchTargets.mockResolvedValue([TARGET])
+    vi.mocked(fetchTargets).mockResolvedValue([TARGET])
     render(<App />)
     await screen.findByText('Google DNS', { selector: '.graph-target-name' })
     expect(screen.queryByRole('button', { name: /Back/ })).not.toBeInTheDocument()
@@ -62,7 +63,7 @@ describe('App initial load', () => {
 
 describe('App zoom state transitions', () => {
   async function renderAndZoom() {
-    fetchTargets.mockResolvedValue([TARGET])
+    vi.mocked(fetchTargets).mockResolvedValue([TARGET])
     const utils = render(<App />)
     await screen.findByText('Google DNS', { selector: '.graph-target-name' })
     dragOnFirstOverlay(utils.container)
@@ -82,7 +83,7 @@ describe('App zoom state transitions', () => {
   })
 
   it('clears zoom state when a sidebar target is selected', async () => {
-    fetchTargets.mockResolvedValue([TARGET, TARGET2])
+    vi.mocked(fetchTargets).mockResolvedValue([TARGET, TARGET2])
     const { container } = render(<App />)
     await screen.findByText('Google DNS', { selector: '.graph-target-name' })
     dragOnFirstOverlay(container)

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import Sidebar from '../components/Sidebar.jsx'
+import Sidebar from '../components/Sidebar'
+import type { TargetNode, FolderNode } from '../types'
 
-const T1 = { type: 'target', path: '8.8.8.8',  name: 'Google DNS' }
-const T2 = { type: 'target', path: '1.1.1.1',  name: 'Cloudflare DNS' }
-const FOLDER = {
+const T1: TargetNode = { type: 'target', path: '8.8.8.8',  name: 'Google DNS', host: '8.8.8.8' }
+const T2: TargetNode = { type: 'target', path: '1.1.1.1',  name: 'Cloudflare DNS', host: '1.1.1.1' }
+const FOLDER: FolderNode = {
   type: 'folder', path: 'CDNs', name: 'CDNs',
-  children: [{ type: 'target', path: 'CDNs/Cloudflare', name: 'Cloudflare' }],
+  children: [{ type: 'target', path: 'CDNs/Cloudflare', name: 'Cloudflare', host: '1.1.1.1' }],
 }
 
 describe('Sidebar loading / error / empty states', () => {

@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { fetchTargets } from './api.js'
-import Sidebar from './components/Sidebar.jsx'
-import GraphView from './components/GraphView.jsx'
-import ZoomView from './components/ZoomView.jsx'
+import { fetchTargets } from './api'
+import Sidebar from './components/Sidebar'
+import GraphView from './components/GraphView'
+import ZoomView from './components/ZoomView'
+import type { TreeNode, TargetNode, ZoomState } from './types'
 
 export default function App() {
-  const [tree, setTree] = useState(null)
+  const [tree, setTree] = useState<TreeNode[] | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [activeTarget, setActiveTarget] = useState(null)
-  const [zoomState, setZoomState] = useState(null) // { target, startTs, endTs } | null
+  const [error, setError] = useState<string | null>(null)
+  const [activeTarget, setActiveTarget] = useState<TargetNode | null>(null)
+  const [zoomState, setZoomState] = useState<ZoomState | null>(null)
 
   useEffect(() => {
     fetchTargets()
@@ -19,7 +20,7 @@ export default function App() {
         const first = findFirstTarget(data)
         if (first) setActiveTarget(first)
       })
-      .catch((e) => {
+      .catch((e: Error) => {
         setError(e.message)
         setLoading(false)
       })
@@ -33,24 +34,25 @@ export default function App() {
     }
   }, [activeTarget])
 
-  function handleSelectTarget(target) {
+  function handleSelectTarget(target: TargetNode) {
     setActiveTarget(target)
     setZoomState(null)
   }
 
-  function handleZoom(startTs, endTs) {
+  function handleZoom(startTs: number, endTs: number) {
+    if (!activeTarget) return
     setZoomState({ target: activeTarget, startTs, endTs })
   }
 
-  function handleZoomFromZoom(startTs, endTs) {
-    setZoomState((z) => ({ ...z, startTs, endTs }))
+  function handleZoomFromZoom(startTs: number, endTs: number) {
+    setZoomState((z) => (z ? { ...z, startTs, endTs } : z))
   }
 
   return (
     <div className="app">
       <Sidebar
         tree={tree}
-        activePath={activeTarget?.path}
+        activePath={activeTarget?.path ?? null}
         onSelect={handleSelectTarget}
         loading={loading}
         error={error}
@@ -72,8 +74,8 @@ export default function App() {
   )
 }
 
-function findFirstTarget(items) {
-  for (const item of items) {
+function findFirstTarget(nodes: TreeNode[]): TargetNode | null {
+  for (const item of nodes) {
     if (item.type === 'target') return item
     if (item.type === 'folder') {
       const found = findFirstTarget(item.children)

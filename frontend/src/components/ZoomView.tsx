@@ -1,23 +1,38 @@
 import { useState, useEffect } from 'react'
-import { graphUrlWindow } from '../api.js'
+import { graphUrlWindow } from '../api'
+import type { TargetNode } from '../types'
 
-function tsToDatetimeLocal(ts) {
+interface ZoomViewProps {
+  target: TargetNode
+  startTs: number
+  endTs: number
+  onBack: () => void
+  onZoom: (startTs: number, endTs: number) => void
+}
+
+interface DragState {
+  x0: number
+  x1: number
+  containerWidth: number
+}
+
+function tsToDatetimeLocal(ts: number): string {
   const d = new Date(ts * 1000)
-  const pad = (n) => String(n).padStart(2, '0')
+  const pad = (n: number) => String(n).padStart(2, '0')
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
     `T${pad(d.getHours())}:${pad(d.getMinutes())}`
   )
 }
 
-function datetimeLocalToTs(s) {
+function datetimeLocalToTs(s: string): number {
   return Math.floor(new Date(s).getTime() / 1000)
 }
 
-export default function ZoomView({ target, startTs, endTs, onBack, onZoom }) {
+export default function ZoomView({ target, startTs, endTs, onBack, onZoom }: ZoomViewProps) {
   const [localStart, setLocalStart] = useState(startTs)
   const [localEnd, setLocalEnd] = useState(endTs)
-  const [drag, setDrag] = useState(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
   const [imgKey, setImgKey] = useState(0)
 
   // Sync local state when props change (e.g. further zoom-in from drag)
@@ -27,7 +42,7 @@ export default function ZoomView({ target, startTs, endTs, onBack, onZoom }) {
     setImgKey((k) => k + 1)
   }, [startTs, endTs])
 
-  function handleStartChange(e) {
+  function handleStartChange(e: React.ChangeEvent<HTMLInputElement>) {
     const ts = datetimeLocalToTs(e.target.value)
     if (!isNaN(ts)) {
       setLocalStart(ts)
@@ -35,7 +50,7 @@ export default function ZoomView({ target, startTs, endTs, onBack, onZoom }) {
     }
   }
 
-  function handleEndChange(e) {
+  function handleEndChange(e: React.ChangeEvent<HTMLInputElement>) {
     const ts = datetimeLocalToTs(e.target.value)
     if (!isNaN(ts)) {
       setLocalEnd(ts)
@@ -49,17 +64,17 @@ export default function ZoomView({ target, startTs, endTs, onBack, onZoom }) {
     onZoom(Math.floor(center - half), Math.floor(center + half))
   }
 
-  function handleMouseDown(e) {
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
     setDrag({ x0: x, x1: x, containerWidth: rect.width })
   }
 
-  function handleMouseMove(e) {
+  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
     if (!drag) return
     const rect = e.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width))
-    setDrag((d) => ({ ...d, x1: x }))
+    setDrag((d) => (d ? { ...d, x1: x } : d))
   }
 
   function handleMouseUp() {

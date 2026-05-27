@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import ZoomView from '../components/ZoomView.jsx'
+import ZoomView from '../components/ZoomView'
+import type { TargetNode } from '../types'
 
-const TARGET = { path: 'CDNs/Cloudflare', name: 'Cloudflare', host: '1.1.1.1' }
+const TARGET: TargetNode = { type: 'target', path: 'CDNs/Cloudflare', name: 'Cloudflare', host: '1.1.1.1' }
 
-function renderZoom({ startTs = 1000, endTs = 2000, onBack, onZoom } = {}) {
+interface RenderZoomOptions {
+  startTs?: number
+  endTs?: number
+  onBack?: () => void
+  onZoom?: (startTs: number, endTs: number) => void
+}
+
+function renderZoom({ startTs = 1000, endTs = 2000, onBack, onZoom }: RenderZoomOptions = {}) {
   onBack = onBack ?? vi.fn()
   onZoom = onZoom ?? vi.fn()
   const result = render(
@@ -14,8 +22,8 @@ function renderZoom({ startTs = 1000, endTs = 2000, onBack, onZoom } = {}) {
 }
 
 // Mock getBoundingClientRect on the drag overlay so containerWidth is non-zero.
-function mockOverlay(container, width = 500) {
-  const overlay = container.querySelector('.graph-drag-overlay')
+function mockOverlay(container: HTMLElement, width = 500) {
+  const overlay = container.querySelector('.graph-drag-overlay') as HTMLElement
   overlay.getBoundingClientRect = vi.fn().mockReturnValue({
     left: 0, width, top: 0, right: width, bottom: 100, height: 100,
   })
@@ -32,8 +40,8 @@ describe('ZoomView rendering', () => {
   it('renders a graph image with the windowed URL', () => {
     const { container } = renderZoom({ startTs: 1000, endTs: 2000 })
     const img = container.querySelector('img')
-    expect(img.getAttribute('src')).toMatch(/start=1000/)
-    expect(img.getAttribute('src')).toMatch(/end=2000/)
+    expect(img?.getAttribute('src')).toMatch(/start=1000/)
+    expect(img?.getAttribute('src')).toMatch(/end=2000/)
   })
 })
 
