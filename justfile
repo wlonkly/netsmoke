@@ -109,6 +109,16 @@ test-frontend-watch:
 build:
     cd frontend && npm run build
 
+# Build and push Docker image for linux/amd64 and linux/arm64
+docker-build tag:
+    docker buildx build --platform linux/amd64,linux/arm64 \
+        -t ghcr.io/wlonkly/netsmoke:{{tag}} . \
+        --push
+
+# Shortcut: build and push with the current git short SHA as tag
+docker:
+    @just docker-build "$(git rev-parse --short HEAD)"
+
 # Install / sync all dependencies
 install:
     cd backend && uv sync --all-groups

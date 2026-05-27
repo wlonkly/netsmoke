@@ -6,13 +6,15 @@ Ports the algorithm from smoke_poc_bars.py and adds DB-backed rendering.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import time
+from collections import OrderedDict
 from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg")  # non-interactive backend, must be set before pyplot import
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 import numpy as np
 from datetime import datetime, timezone
@@ -31,6 +33,40 @@ RANGE_BUCKET_SIZE = {
     "1mo": "hour",
     "1y":  "day",
 }
+
+CACHE_TTL = 60       # seconds; matches default collection interval
+CACHE_MAXSIZE = 512  # max entries before LRU eviction
+MAX_RENDER_POINTS = 200  # sub-sample to at most this many data points per graph
+
+
+class _TTLCache:
+    """In-memory TTL cache with LRU eviction. Thread-safe for asyncio use."""
+    def __init__(self, maxsize: int = CACHE_MAXSIZE, ttl: float = CACHE_TTL):
+        self._cache: OrderedDict = OrderedDict()
+        self._maxsize = maxsize
+        self._ttl = ttl
+
+    def get(self, key: tuple) -> bytes | None:
+        if key not in self._cache:
+            return None
+        ts, value = self._cache[key]
+        if time.monotonic() - ts > self._ttl:
+            del self._cache[key]
+            return None
+        self._cache.move_to_end(key)
+        return value
+
+    def set(self, key: tuple, value: bytes) -> None:
+        self._cache[key] = (time.monotonic(), value)
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
+_graph_cache = _TTLCache()
 
 
 def _loss_color(loss_pct: float) -> str:
@@ -101,13 +137,15 @@ def build_rtt_matrix(
     """
     Convert flat DB rows → (timestamps, rtt_matrix, loss_pcts).
 
+    Groups by timestamp, then sub-samples to at most MAX_RENDER_POINTS
+    evenly-spaced timestamps so the matrix is bounded.
+
     rows: list of (time, sample_num, rtt_ms)
     Returns:
         timestamps: list of datetime objects (one per measurement)
         rtt_matrix: shape (N, num_pings), NaN for lost packets
         loss_pcts:  shape (N,), fraction 0..1 of lost packets
     """
-    # Group by timestamp
     by_time: dict[int, list[Optional[float]]] = {}
     for ts, sample_num, rtt in rows:
         by_time.setdefault(ts, []).append(rtt)
@@ -116,8 +154,12 @@ def build_rtt_matrix(
         return [], np.empty((0, num_pings)), np.empty(0)
 
     sorted_times = sorted(by_time.keys())
-    timestamps = [datetime.fromtimestamp(t, tz=timezone.utc) for t in sorted_times]
+    n = len(sorted_times)
+    if n > MAX_RENDER_POINTS:
+        indices = np.linspace(0, n - 1, MAX_RENDER_POINTS).astype(int)
+        sorted_times = [sorted_times[i] for i in indices]
 
+    timestamps = [datetime.fromtimestamp(t, tz=timezone.utc) for t in sorted_times]
     n = len(sorted_times)
     rtt_matrix = np.full((n, num_pings), np.nan)
     loss_pcts = np.zeros(n)
@@ -141,11 +183,19 @@ def build_rollup_rtt_matrix(
     """
     Convert rollup dicts → (timestamps, rtt_matrix, loss_pcts).
 
+    Sub-samples to at most MAX_RENDER_POINTS evenly-spaced buckets
+    so the resulting matrix is bounded regardless of window size.
+
     rollup_rows: list of dicts with keys bucket_start, sorted_rtts, loss_count, total_count
     Returns same tuple as build_rtt_matrix.
     """
     if not rollup_rows:
         return [], np.empty((0, num_pings)), np.empty(0)
+
+    n = len(rollup_rows)
+    if n > MAX_RENDER_POINTS:
+        indices = np.linspace(0, n - 1, MAX_RENDER_POINTS).astype(int)
+        rollup_rows = [rollup_rows[i] for i in indices]
 
     n = len(rollup_rows)
     timestamps = [datetime.fromtimestamp(r["bucket_start"], tz=timezone.utc) for r in rollup_rows]
@@ -191,9 +241,13 @@ def render_graph(
     requested period even when data only covers part of it.
     When both are 0, defaults to now-3h to now.
 
+    This function does NOT use pyplot, so it is safe to call from
+    asyncio.to_thread() or concurrent.futures threads.
+
     Returns PNG bytes.
     """
-    fig, ax = plt.subplots(figsize=(12, 4))
+    fig = Figure(figsize=(12, 4))
+    ax = fig.add_subplot(111)
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
@@ -213,10 +267,10 @@ def render_graph(
             ha="center", va="center",
             color="#888888", fontsize=14,
         )
-        _style_axes(ax, title, duration_s)
+        _style_axes(fig, ax, title, duration_s)
         buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-        plt.close(fig)
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
+        fig.clear()
         return buf.getvalue()
 
     n, num_pings = rtt_matrix.shape
@@ -257,28 +311,33 @@ def render_graph(
     # Median bar: a thin colored horizontal bar at the median RTT for each
     # time slot, spanning the full column width — matches SmokePing's appearance.
     medians = np.median(display_matrix, axis=1)
+    valid_mask = ~np.isnan(medians) & (medians > 0)
+    valid_meds = medians[valid_mask]
+
     y_max = float(np.nanmax(sorted_pings)) if sorted_pings.size > 0 else 1.0
     bar_h = y_max * 0.04  # 4% of y range
 
-    for xi, med, loss in zip(x, medians, loss_pcts):
-        if not np.isnan(med) and med > 0:
-            ax.bar(
-                [xi], [bar_h], width=width,
-                bottom=med - bar_h / 2,
-                color=_loss_color(loss * 100),
-                linewidth=0, align="center", edgecolor="none",
-                zorder=100,
-            )
+    valid_x = x[valid_mask]
+    valid_bottom = valid_meds - bar_h / 2
+    valid_colors = [_loss_color(l * 100) for l in loss_pcts[valid_mask]]
 
-    _style_axes(ax, title, duration_s)
+    ax.bar(
+        valid_x, [bar_h] * len(valid_x), width=width,
+        bottom=valid_bottom,
+        color=valid_colors,
+        linewidth=0, align="center", edgecolor="none",
+        zorder=100,
+    )
+
+    _style_axes(fig, ax, title, duration_s)
 
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-    plt.close(fig)
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
+    fig.clear()
     return buf.getvalue()
 
 
-def _style_axes(ax: plt.Axes, title: str, duration_s: float) -> None:
+def _style_axes(fig: Figure, ax, title: str, duration_s: float) -> None:
     ax.set_title(title, color="#1a1a2e", fontsize=12, pad=8)
     ax.set_xlabel("Time", color="#555577", fontsize=10)
     ax.set_ylabel("Latency (ms)", color="#555577", fontsize=10)
@@ -294,7 +353,7 @@ def _style_axes(ax: plt.Axes, title: str, duration_s: float) -> None:
     ax.xaxis.set_major_locator(locator)
     ax.xaxis.set_major_formatter(formatter)
 
-    plt.gcf().autofmt_xdate(rotation=30, ha="right")
+    fig.autofmt_xdate(rotation=30, ha="right")
 
 
 async def render_graph_for_window(
@@ -309,13 +368,39 @@ async def render_graph_for_window(
     Query the DB and render a graph for the given target and exact time window.
 
     If bucket_size is provided ("hour" or "day"), queries the rollup table.
-    Otherwise queries raw ping_samples.
+    Otherwise queries raw ping_samples. Results are cached in-memory with a
+    60-second TTL and 60-second timestamp quantization.
     """
+    # Quantize timestamps to 60s boundaries so concurrent/repeated requests
+    # within the same window share a cache entry.
+    start_ts = (start_ts // 60) * 60
+    end_ts = (end_ts // 60) * 60
+    cache_key = (target, start_ts, end_ts, num_pings, bucket_size)
+
+    cached = _graph_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     _BUCKET_SECONDS = {"hour": 3600.0, "day": 86400.0}
 
     if bucket_size is None:
-        from netsmoke.db import query_samples
-        rows = await query_samples(db, target, start_ts, end_ts)
+        # Sub-sample at the SQL level: estimate total timestamps from the
+        # window size and add a modulo filter so SQLite only returns ~1/step
+        # of the rows. The covering index handles this as an index-only scan.
+        est_timestamps = max(1, (end_ts - start_ts) // 60)
+        step = max(1, est_timestamps // MAX_RENDER_POINTS)
+        if step > 1:
+            offset = start_ts % step
+            async with db.execute(
+                "SELECT time, sample_num, rtt_ms FROM ping_samples "
+                "WHERE target = ? AND time >= ? AND time <= ? AND (time % ?) = ? "
+                "ORDER BY time, sample_num",
+                (target, start_ts, end_ts, step, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            from netsmoke.db import query_samples
+            rows = await query_samples(db, target, start_ts, end_ts)
         timestamps, rtt_matrix, loss_pcts = build_rtt_matrix(rows, num_pings)
         bar_width_seconds = 60.0  # one measurement interval
     else:
@@ -324,13 +409,16 @@ async def render_graph_for_window(
         timestamps, rtt_matrix, loss_pcts = build_rollup_rtt_matrix(rows, num_pings)
         bar_width_seconds = _BUCKET_SECONDS[bucket_size]
 
-    return render_graph(
-        timestamps, rtt_matrix, loss_pcts,
-        title=target,
-        start_ts=start_ts,
-        end_ts=end_ts,
+    # Offload matplotlib rendering to a thread so it doesn't block the
+    # asyncio event loop. Other requests (health, targets, stats) can
+    # proceed while the graph renders on a thread-pool worker.
+    png_bytes = await asyncio.to_thread(
+        render_graph, timestamps, rtt_matrix, loss_pcts,
+        title=target, start_ts=start_ts, end_ts=end_ts,
         bar_width_seconds=bar_width_seconds,
     )
+    _graph_cache.set(cache_key, png_bytes)
+    return png_bytes
 
 
 async def render_graph_for_target(

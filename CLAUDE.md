@@ -76,13 +76,21 @@ FastAPI's `{target_path:path}` route parameter captures slashes, so nested paths
 
 The backend has it in `graph.py` for rendering. The frontend has a copy in `GraphView.jsx` to compute `startTs`/`endTs` for each panel's drag overlay at render time. Keep them in sync if you add ranges.
 
-### `matplotlib.use("Agg")` must appear before pyplot import
+### `matplotlib.use("Agg")` must appear before any other matplotlib import
 
-It's at the top of `graph.py`. If you add any new file that imports matplotlib, do the same before importing `pyplot`. The backend is a server process with no display — without `Agg`, matplotlib will try to open a GUI window and crash.
+It's at the top of `graph.py`. If you add any new file that imports matplotlib, do the same before importing any matplotlib module. `graph.py` does NOT import `pyplot` — it uses `Figure` from `matplotlib.figure` directly to avoid the global pyplot state machine, which makes `render_graph()` safe to call from threads.
+
+### Rendering is offloaded to a thread pool
+
+`render_graph_for_window` in `graph.py` calls `asyncio.to_thread(render_graph, ...)` so that matplotlib rendering does not block the asyncio event loop. On a multi-core VM this lets 4 concurrent panel renders run in parallel on the thread pool instead of serializing on the event loop. Other endpoints (health, targets, stats) remain responsive during rendering.
+
+### Rendered PNGs are cached in-memory with a 60s TTL
+
+`_TTLCache` in `graph.py` caches the final PNG bytes keyed by `(target, start_ts, end_ts, num_pings, bucket_size)`. Timestamps are quantized to 60-second boundaries so all requests within the same minute share a cache entry. Cache entries expire after 60s (matching the default collection interval) and LRU-evict at 512 entries.
 
 ### Graph x-axis ticks are driven by duration, not a range name
 
-`_locator_and_format(duration_s)` in `graph.py` picks the tick density based on the actual window length in seconds. `render_graph()` no longer takes a `time_range` string — it takes `start_ts`/`end_ts` ints and computes `duration_s = end_ts - start_ts`. If you call `render_graph()` directly in tests, pass `start_ts`/`end_ts` instead of `time_range`.
+`_locator_and_format(duration_s)` in `graph.py` picks the tick density based on the actual window length in seconds. If you call `render_graph()` directly in tests, pass `start_ts`/`end_ts` instead of `time_range`.
 
 ---
 
