@@ -144,7 +144,11 @@ def create_app() -> FastAPI:
             png_bytes = await render_graph_for_target(
                 db, target_path, range, num_pings=config.ping_count
             )
-        return Response(content=png_bytes, media_type="image/png")
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=60"},
+        )
 
     @app.get("/api/targets/{target_path:path}/stats")
     async def get_stats(

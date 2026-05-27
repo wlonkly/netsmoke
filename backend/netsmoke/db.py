@@ -29,6 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_ping_samples_target_time
     ON ping_samples (target, time);
 """
 
+CREATE_COVERING_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_ping_samples_covering
+    ON ping_samples (target, time, sample_num, rtt_ms);
+"""
+
 CREATE_ROLLUP_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS ping_rollups (
     id           INTEGER PRIMARY KEY,
@@ -47,6 +52,11 @@ CREATE INDEX IF NOT EXISTS idx_ping_rollups_target_bucket
     ON ping_rollups (target, bucket_start, bucket_size);
 """
 
+CREATE_ROLLUP_LOOKUP_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_ping_rollups_target_size_start
+    ON ping_rollups (target, bucket_size, bucket_start);
+"""
+
 _BUCKET_DURATIONS = {
     "hour": 3600,
     "day":  86400,
@@ -57,8 +67,10 @@ async def init_db(db: aiosqlite.Connection) -> None:
     """Create tables and indexes if they don't exist."""
     await db.execute(CREATE_TABLE_SQL)
     await db.execute(CREATE_INDEX_SQL)
+    await db.execute(CREATE_COVERING_INDEX_SQL)
     await db.execute(CREATE_ROLLUP_TABLE_SQL)
     await db.execute(CREATE_ROLLUP_INDEX_SQL)
+    await db.execute(CREATE_ROLLUP_LOOKUP_INDEX_SQL)
     await db.commit()
 
 
@@ -67,6 +79,7 @@ async def open_db(path: str) -> aiosqlite.Connection:
     db = await aiosqlite.connect(path)
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA synchronous=NORMAL")
+    await db.execute("PRAGMA cache_size=-65536")  # 64 MB cache
     await init_db(db)
     return db
 
