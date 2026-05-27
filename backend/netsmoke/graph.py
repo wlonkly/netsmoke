@@ -269,6 +269,7 @@ def render_graph(
         _style_axes(fig, ax, title, duration_s)
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
+        fig.clear()
         return buf.getvalue()
 
     n, num_pings = rtt_matrix.shape
@@ -327,6 +328,7 @@ def render_graph(
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=100, bbox_inches="tight", facecolor=fig.get_facecolor())
+    fig.clear()
     return buf.getvalue()
 
 
